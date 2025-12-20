@@ -44,17 +44,19 @@ public class McpSseController {
     }
 
     @GetMapping(path = "/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter connect() {
-        String sessionId = UUID.randomUUID().toString();
-        SseEmitter emitter = sessionRegistry.register(sessionId, timeoutMs);
+    public SseEmitter connect(@RequestParam(name = "sessionId", required = false) String sessionId) {
+        String resolvedSessionId = StringUtils.hasText(sessionId) ? sessionId : UUID.randomUUID().toString();
+        SseEmitter emitter = sessionRegistry.register(resolvedSessionId, timeoutMs);
 
         String endpoint = ServletUriComponentsBuilder.fromCurrentContextPath()
                 .path("/sse/messages/")
-                .path(sessionId)
+                .path(resolvedSessionId)
                 .toUriString();
 
-        sessionRegistry.sendEndpoint(sessionId, endpoint);
-        logger.info("SSE client connected: {}", sessionId);
+        McpSessionRegistry.Session session = sessionRegistry.getSession(resolvedSessionId);
+        sessionRegistry.refresh(session, timeoutMs);
+        sessionRegistry.sendEndpoint(session, endpoint);
+        logger.info("SSE client connected: {}", resolvedSessionId);
         return emitter;
     }
 
@@ -64,15 +66,27 @@ public class McpSseController {
                                                     @RequestParam(name = "sessionId", required = false) String sessionQuery,
                                                     @RequestHeader(name = "MCP-Session", required = false) String sessionHeader) {
         String resolvedSessionId = resolveSessionId(sessionId, sessionQuery, sessionHeader);
-        if (!StringUtils.hasText(resolvedSessionId) || !sessionRegistry.contains(resolvedSessionId)) {
+        McpSessionRegistry.Session session = StringUtils.hasText(resolvedSessionId)
+                ? sessionRegistry.getSession(resolvedSessionId)
+                : null;
+
+        if (session == null) {
             ObjectNode error = objectMapper.createObjectNode();
             error.put("error", "Unknown or expired session");
             return ResponseEntity.status(HttpStatus.GONE).body(error);
         }
 
+        sessionRegistry.refresh(session, timeoutMs);
         List<ObjectNode> responses = jsonRpcHandler.handlePayload(payload);
         for (ObjectNode response : responses) {
-            sessionRegistry.sendMessage(resolvedSessionId, response);
+            sessionRegistry.sendMessage(session, response);
+        }
+
+        if (session.getEmitter() == null) {
+            ObjectNode direct = objectMapper.createObjectNode();
+            direct.put("status", "disconnected");
+            direct.set("responses", objectMapper.valueToTree(responses));
+            return ResponseEntity.ok(direct);
         }
 
         ObjectNode accepted = objectMapper.createObjectNode();

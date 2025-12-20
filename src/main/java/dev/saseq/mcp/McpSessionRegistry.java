@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -14,41 +15,96 @@ import java.util.concurrent.ConcurrentHashMap;
 public class McpSessionRegistry {
     private static final Logger logger = LoggerFactory.getLogger(McpSessionRegistry.class);
 
-    private final Map<String, SseEmitter> sessions = new ConcurrentHashMap<>();
+    private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 
     public SseEmitter register(String sessionId, long timeoutMs) {
-        SseEmitter emitter = new SseEmitter(timeoutMs);
-        sessions.put(sessionId, emitter);
+        Session session = sessions.compute(sessionId, (key, existing) -> {
+            long expiresAt = Instant.now().toEpochMilli() + timeoutMs;
+            if (existing == null) {
+                return new Session(null, expiresAt);
+            }
+            existing.setExpiresAt(expiresAt);
+            return existing;
+        });
 
-        emitter.onCompletion(() -> sessions.remove(sessionId));
-        emitter.onTimeout(() -> sessions.remove(sessionId));
-        emitter.onError((ex) -> sessions.remove(sessionId));
+        SseEmitter emitter = new SseEmitter(timeoutMs);
+        session.setEmitter(emitter);
+
+        emitter.onCompletion(() -> detachEmitter(sessionId));
+        emitter.onTimeout(() -> detachEmitter(sessionId));
+        emitter.onError((ex) -> detachEmitter(sessionId));
 
         return emitter;
     }
 
-    public boolean contains(String sessionId) {
-        return sessions.containsKey(sessionId);
+    public Session getSession(String sessionId) {
+        Session session = sessions.get(sessionId);
+        if (session == null) {
+            return null;
+        }
+        if (session.isExpired()) {
+            sessions.remove(sessionId);
+            return null;
+        }
+        return session;
     }
 
-    public void sendEndpoint(String sessionId, String endpoint) {
-        sendEvent(sessionId, "endpoint", endpoint, MediaType.TEXT_PLAIN);
+    public void refresh(Session session, long timeoutMs) {
+        if (session != null) {
+            session.setExpiresAt(Instant.now().toEpochMilli() + timeoutMs);
+        }
     }
 
-    public void sendMessage(String sessionId, Object payload) {
-        sendEvent(sessionId, "message", payload, MediaType.APPLICATION_JSON);
+    public void sendEndpoint(Session session, String endpoint) {
+        sendEvent(session, "endpoint", endpoint, MediaType.TEXT_PLAIN);
     }
 
-    private void sendEvent(String sessionId, String event, Object payload, MediaType mediaType) {
-        SseEmitter emitter = sessions.get(sessionId);
-        if (emitter == null) {
+    public void sendMessage(Session session, Object payload) {
+        sendEvent(session, "message", payload, MediaType.APPLICATION_JSON);
+    }
+
+    private void sendEvent(Session session, String event, Object payload, MediaType mediaType) {
+        if (session == null || session.getEmitter() == null) {
             return;
         }
         try {
-            emitter.send(SseEmitter.event().name(event).data(payload, mediaType));
+            session.getEmitter().send(SseEmitter.event().name(event).data(payload, mediaType));
         } catch (IOException ex) {
-            logger.warn("Failed to send SSE event {} for session {}", event, sessionId, ex);
-            sessions.remove(sessionId);
+            logger.warn("Failed to send SSE event {}", event, ex);
+            session.setEmitter(null);
+        }
+    }
+
+    private void detachEmitter(String sessionId) {
+        Session session = sessions.get(sessionId);
+        if (session != null) {
+            session.setEmitter(null);
+        }
+    }
+
+    public static class Session {
+        private volatile SseEmitter emitter;
+        private volatile long expiresAt;
+
+        private Session(SseEmitter emitter, long expiresAt) {
+            this.emitter = emitter;
+            this.expiresAt = expiresAt;
+        }
+
+        public SseEmitter getEmitter() {
+            return emitter;
+        }
+
+        public void setEmitter(SseEmitter emitter) {
+            this.emitter = emitter;
+        }
+
+        public boolean isExpired() {
+            return Instant.now().toEpochMilli() > expiresAt;
+        }
+
+        public void setExpiresAt(long expiresAt) {
+            this.expiresAt = expiresAt;
         }
     }
 }
