@@ -412,4 +412,4 @@ async def send_webhook_message(webhook_url: str, message: str) -> str:
 if __name__ == "__main__":
     os.environ.setdefault("HOST", MCP_BIND_ADDRESS)
     os.environ.setdefault("PORT", str(MCP_HTTP_PORT))
-    mcp.run(transport="streamable-http", uvicorn_kwargs={"host": MCP_BIND_ADDRESS, "port": MCP_HTTP_PORT})
+    mcp.run(transport="streamable-http")

@@ -6,9 +6,9 @@ services:
     environment:
       DISCORD_TOKEN: "${DISCORD_TOKEN}"
       DISCORD_GUILD_ID: "${DISCORD_GUILD_ID}"
-      MCP_HTTP_PORT: "8085"
+      MCP_HTTP_PORT: "8000"
       MCP_BIND_ADDRESS: "0.0.0.0"
       HOST: "0.0.0.0"
-      PORT: "8085"
+      PORT: "8000"
     ports:
-      - "8085:8085"
+      - "8085:8000"
