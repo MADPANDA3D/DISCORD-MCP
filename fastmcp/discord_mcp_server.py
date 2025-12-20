@@ -7,6 +7,7 @@ import discord
 from discord.ext import commands
 from mcp.server.fastmcp import FastMCP
 import uvicorn
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
@@ -414,7 +415,10 @@ if __name__ == "__main__":
     os.environ.setdefault("HOST", MCP_BIND_ADDRESS)
     os.environ.setdefault("PORT", str(MCP_HTTP_PORT))
     app_factory = mcp.streamable_http_app
-    if callable(app_factory):
-        uvicorn.run(app_factory, host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT, factory=True)
-    else:
-        uvicorn.run(app_factory, host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT)
+
+    def build_app():
+        app = app_factory() if callable(app_factory) else app_factory
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+        return app
+
+    uvicorn.run(build_app, host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT, factory=True)
