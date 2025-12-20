@@ -418,7 +418,22 @@ if __name__ == "__main__":
 
     def build_app():
         app = app_factory() if callable(app_factory) else app_factory
-        app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
-        return app
+        try:
+            app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+        except Exception:
+            pass
+
+        async def host_override(scope, receive, send):
+            if scope["type"] == "http":
+                headers = []
+                for key, value in scope.get("headers", []):
+                    if key.lower() == b"host":
+                        continue
+                    headers.append((key, value))
+                headers.append((b"host", b"localhost"))
+                scope = {**scope, "headers": headers}
+            await app(scope, receive, send)
+
+        return host_override
 
     uvicorn.run(build_app, host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT, factory=True)
