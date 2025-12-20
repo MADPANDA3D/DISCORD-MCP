@@ -22,11 +22,18 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 mcp = FastMCP(name="discord-mcp", stateless_http=True, json_response=True)
+bot_task = None
+bot_lock = asyncio.Lock()
 
 
 async def ensure_ready():
-    if not bot.is_ready():
-        await bot.wait_until_ready()
+    global bot_task
+    if bot.is_ready():
+        return
+    async with bot_lock:
+        if bot_task is None or bot_task.done():
+            bot_task = asyncio.create_task(bot.start(DISCORD_TOKEN))
+    await bot.wait_until_ready()
 
 
 def resolve_guild_id(guild_id: str | None) -> int:
@@ -68,17 +75,6 @@ async def get_dm_channel(user_id: str) -> discord.DMChannel:
     if user is None:
         raise ValueError("User not found by userId")
     return await user.create_dm()
-
-
-@mcp.on_startup
-async def startup():
-    asyncio.create_task(bot.start(DISCORD_TOKEN))
-
-
-@mcp.on_shutdown
-async def shutdown():
-    if bot.is_ready():
-        await bot.close()
 
 
 @mcp.tool()
@@ -185,7 +181,10 @@ async def get_user_id_by_name(username: str, guild_id: str | None = None) -> str
         name = username[:idx]
         discriminator = username[idx + 1 :]
 
-    members = [m for m in guild.members if m.name.lower() == name.lower()]
+    members = [
+        m async for m in guild.fetch_members(limit=None)
+        if m.name.lower() == name.lower()
+    ]
     if discriminator:
         members = [m for m in members if m.discriminator == discriminator]
 
