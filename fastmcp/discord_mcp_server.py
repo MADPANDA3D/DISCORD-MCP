@@ -414,10 +414,35 @@ if __name__ == "__main__":
     os.environ.setdefault("HOST", MCP_BIND_ADDRESS)
     os.environ.setdefault("PORT", str(MCP_HTTP_PORT))
     app = None
-    for attr in ("app", "_app", "_asgi_app", "asgi_app"):
-        app = getattr(mcp, attr, None)
+    for attr in ("app", "_app", "asgi_app", "_asgi_app", "http_app", "_http_app"):
+        candidate = getattr(mcp, attr, None)
+        if callable(candidate):
+            try:
+                app = candidate()
+            except TypeError:
+                app = None
+        else:
+            app = candidate
         if app is not None:
             break
+
+    if app is None:
+        server = getattr(mcp, "server", None) or getattr(mcp, "_server", None)
+        candidate = getattr(server, "app", None) if server is not None else None
+        if candidate is not None:
+            app = candidate
+
+    if app is None:
+        for method in ("build_app", "create_app", "get_app", "_build_app", "_create_app", "_get_app"):
+            candidate = getattr(mcp, method, None)
+            if callable(candidate):
+                try:
+                    app = candidate()
+                except TypeError:
+                    app = None
+            if app is not None:
+                break
+
     if app is not None:
         uvicorn.run(app, host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT)
     else:
