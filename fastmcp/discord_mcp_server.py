@@ -413,5 +413,8 @@ async def send_webhook_message(webhook_url: str, message: str) -> str:
 if __name__ == "__main__":
     os.environ.setdefault("HOST", MCP_BIND_ADDRESS)
     os.environ.setdefault("PORT", str(MCP_HTTP_PORT))
-    app = mcp.streamable_http_app
-    uvicorn.run(app, host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT)
+    app_factory = mcp.streamable_http_app
+    if callable(app_factory):
+        uvicorn.run(app_factory, host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT, factory=True)
+    else:
+        uvicorn.run(app_factory, host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT)
