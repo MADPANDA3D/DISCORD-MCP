@@ -6,6 +6,7 @@ import aiohttp
 import discord
 from discord.ext import commands
 from mcp.server.fastmcp import FastMCP
+import uvicorn
 
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
@@ -412,4 +413,12 @@ async def send_webhook_message(webhook_url: str, message: str) -> str:
 if __name__ == "__main__":
     os.environ.setdefault("HOST", MCP_BIND_ADDRESS)
     os.environ.setdefault("PORT", str(MCP_HTTP_PORT))
-    mcp.run(transport="streamable-http")
+    app = None
+    for attr in ("app", "_app", "_asgi_app", "asgi_app"):
+        app = getattr(mcp, attr, None)
+        if app is not None:
+            break
+    if app is not None:
+        uvicorn.run(app, host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT)
+    else:
+        mcp.run(transport="streamable-http")
