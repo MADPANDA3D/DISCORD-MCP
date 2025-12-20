@@ -410,4 +410,4 @@ async def send_webhook_message(webhook_url: str, message: str) -> str:
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http", host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT)
+    mcp.run(transport="streamable-http", port=MCP_HTTP_PORT)
