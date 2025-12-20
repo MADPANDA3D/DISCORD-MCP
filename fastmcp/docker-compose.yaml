@@ -1,0 +1,12 @@
+services:
+  discord-mcp:
+    container_name: discord-mcp
+    build: .
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: "${DISCORD_TOKEN}"
+      DISCORD_GUILD_ID: "${DISCORD_GUILD_ID}"
+      MCP_HTTP_PORT: "8085"
+      MCP_BIND_ADDRESS: "0.0.0.0"
+    ports:
+      - "8085:8085"
