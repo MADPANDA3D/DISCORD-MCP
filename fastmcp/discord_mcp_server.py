@@ -23,7 +23,12 @@ intents.members = True
 intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
-mcp = FastMCP(name="discord-mcp", stateless_http=True, json_response=True)
+mcp = FastMCP(
+    name="discord-mcp",
+    stateless_http=True,
+    json_response=True,
+    host="0.0.0.0",
+)
 bot_task = None
 bot_lock = asyncio.Lock()
 
