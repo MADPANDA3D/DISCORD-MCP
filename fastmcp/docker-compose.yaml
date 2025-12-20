@@ -10,5 +10,11 @@ services:
       MCP_BIND_ADDRESS: "0.0.0.0"
       HOST: "0.0.0.0"
       PORT: "8000"
+    networks:
+      - npm_default
     ports:
       - "8085:8085"
+
+networks:
+  npm_default:
+    external: true

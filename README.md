@@ -48,43 +48,59 @@ Enable your AI assistants to seamlessly interact with Discord. Manage channels, 
 
 ## Streamable HTTP Transport (n8n)
 
-This server uses the MCP Streamable HTTP transport and exposes a single `/mcp` endpoint for GET and POST.
+The recommended HTTP transport is the FastMCP server in `fastmcp/`. It exposes a single `/mcp` endpoint for GET and POST.
 
 Environment variables:
-- `MCP_TRANSPORT`: `http` | `stdio` (default `http`)
-- `MCP_HTTP_PORT`: HTTP port (default `8085`)
-- `MCP_BIND_ADDRESS`: bind address (default `0.0.0.0`; use `::` to bind IPv6)
-- `MCP_STDIO`: override stdio enablement (`true`/`false`)
+- `DISCORD_TOKEN`: Discord bot token (required)
+- `DISCORD_GUILD_ID`: Default guild/server ID (optional)
 
-Docker example (HTTP):
+Docker Compose (recommended):
 ```bash
-docker run --rm -p 8085:8085 \
-  -e DISCORD_TOKEN=<YOUR_DISCORD_BOT_TOKEN> \
-  -e DISCORD_GUILD_ID=<OPTIONAL_DEFAULT_SERVER_ID> \
-  -e MCP_TRANSPORT=http \
-  saseq/discord-mcp:latest
+cd fastmcp
+cp .env.example .env
+# Edit .env with your DISCORD_TOKEN and DISCORD_GUILD_ID
+docker-compose up -d --build
 ```
 
 Endpoints:
-- `GET /health` -> `{"status":"ok","service":"discord-mcp"}`
 - `GET /mcp` -> SSE stream for server-initiated notifications
 - `POST /mcp` -> JSON-RPC requests (returns JSON or SSE per request)
 
 Example curl flow:
 ```bash
-# 1) Initialize session (returns Mcp-Session-Id header)
+# 1) Initialize session
 curl -i -X POST http://localhost:8085/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 
 # 2) List tools
-curl -X POST http://localhost:8085/mcp \
+curl -i -X POST http://localhost:8085/mcp \
   -H "Content-Type: application/json" \
   -H "Accept: application/json, text/event-stream" \
-  -H "Mcp-Session-Id: <session-id>" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
+
+### VPS Deployment (Nginx Proxy Manager)
+
+Attach the FastMCP container to the same Docker network as Nginx Proxy Manager (usually `npm_default`).
+
+NPM host settings:
+- Forward Hostname/IP: `discord-mcp`
+- Forward Port: `8085`
+- Websockets: ON
+- HTTP/2: OFF
+- Advanced: empty
+
+Then point n8n to:
+- Endpoint: `https://discord-mcp.yourdomain.com/mcp`
+- Transport: HTTP Streamable
+
+Hostinger VPS (affiliate links):
+- KVM 1: https://www.hostinger.com/cart?product=vps%3Avps_kvm_1&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=019b3c9f-6443-7070-b054-57dd34af9aba
+- KVM 2: https://www.hostinger.com/cart?product=vps%3Avps_kvm_2&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=019b3c9f-b07b-71be-bd64-00f81c1bdb82
+- KVM 4: https://www.hostinger.com/cart?product=vps%3Avps_kvm_4&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=019b3c9f-d6e0-7180-b425-9c286e86986e
+- KVM 8: https://www.hostinger.com/cart?product=vps%3Avps_kvm_8&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=019b3ca0-15e3-710a-a3c3-51c7d2921f86
 
 <details>
     <summary style="font-size: 1.35em; font-weight: bold;">
