@@ -46,6 +46,47 @@ Enable your AI assistants to seamlessly interact with Discord. Manage channels, 
 }
 ```
 
+## HTTP/SSE Transport (n8n, HTTP Streamable)
+
+Set `MCP_TRANSPORT` to `sse` (HTTP only) or `both` (HTTP + stdio). Default is `stdio`.
+
+Environment variables:
+- `MCP_TRANSPORT`: `stdio` | `sse` | `both`
+- `MCP_HTTP_PORT`: HTTP port (default `8085`)
+- `MCP_BIND_ADDRESS`: bind address (default `0.0.0.0`; use `::` to bind IPv6)
+- `MCP_SSE_TIMEOUT_MS`: SSE connection timeout (default `300000`)
+- `MCP_STDIO`: override stdio enablement (`true`/`false`)
+
+Docker example (HTTP/SSE):
+```bash
+docker run --rm -p 8085:8085 \
+  -e DISCORD_TOKEN=<YOUR_DISCORD_BOT_TOKEN> \
+  -e DISCORD_GUILD_ID=<OPTIONAL_DEFAULT_SERVER_ID> \
+  -e MCP_TRANSPORT=sse \
+  saseq/discord-mcp:latest
+```
+
+Endpoints:
+- `GET /health` -> `{"status":"ok","service":"discord-mcp"}`
+- `GET /sse` -> opens SSE stream and returns an `endpoint` event
+- `POST /sse/messages/{sessionId}` -> send MCP JSON-RPC requests
+
+Example curl flow:
+```bash
+# 1) Open SSE stream (copy the endpoint event URL from the output)
+curl -N http://localhost:8085/sse
+
+# 2) Initialize MCP session using the endpoint URL
+curl -X POST http://localhost:8085/sse/messages/<sessionId> \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{}}'
+
+# 3) List tools
+curl -X POST http://localhost:8085/sse/messages/<sessionId> \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":"2","method":"tools/list","params":{}}'
+```
+
 <details>
     <summary style="font-size: 1.35em; font-weight: bold;">
         🔧 Manual Installation
