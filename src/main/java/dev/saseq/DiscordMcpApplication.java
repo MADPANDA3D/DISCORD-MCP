@@ -11,7 +11,7 @@ import java.util.Map;
 @SpringBootApplication
 public class DiscordMcpApplication {
     public static void main(String[] args) {
-        String transport = System.getenv().getOrDefault("MCP_TRANSPORT", "stdio")
+        String transport = System.getenv().getOrDefault("MCP_TRANSPORT", "http")
                 .trim()
                 .toLowerCase(Locale.ROOT);
 

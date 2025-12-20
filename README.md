@@ -46,45 +46,44 @@ Enable your AI assistants to seamlessly interact with Discord. Manage channels, 
 }
 ```
 
-## HTTP/SSE Transport (n8n, HTTP Streamable)
+## Streamable HTTP Transport (n8n)
 
-Set `MCP_TRANSPORT` to `sse` (HTTP only) or `both` (HTTP + stdio). Default is `stdio`.
+This server uses the MCP Streamable HTTP transport and exposes a single `/mcp` endpoint for GET and POST.
 
 Environment variables:
-- `MCP_TRANSPORT`: `stdio` | `sse` | `both`
+- `MCP_TRANSPORT`: `http` | `stdio` (default `http`)
 - `MCP_HTTP_PORT`: HTTP port (default `8085`)
 - `MCP_BIND_ADDRESS`: bind address (default `0.0.0.0`; use `::` to bind IPv6)
-- `MCP_SSE_TIMEOUT_MS`: SSE connection timeout (default `300000`)
 - `MCP_STDIO`: override stdio enablement (`true`/`false`)
 
-Docker example (HTTP/SSE):
+Docker example (HTTP):
 ```bash
 docker run --rm -p 8085:8085 \
   -e DISCORD_TOKEN=<YOUR_DISCORD_BOT_TOKEN> \
   -e DISCORD_GUILD_ID=<OPTIONAL_DEFAULT_SERVER_ID> \
-  -e MCP_TRANSPORT=sse \
+  -e MCP_TRANSPORT=http \
   saseq/discord-mcp:latest
 ```
 
 Endpoints:
 - `GET /health` -> `{"status":"ok","service":"discord-mcp"}`
-- `GET /sse` -> opens SSE stream and returns an `endpoint` event
-- `POST /sse/messages/{sessionId}` -> send MCP JSON-RPC requests
+- `GET /mcp` -> SSE stream for server-initiated notifications
+- `POST /mcp` -> JSON-RPC requests (returns JSON or SSE per request)
 
 Example curl flow:
 ```bash
-# 1) Open SSE stream (copy the endpoint event URL from the output)
-curl -N http://localhost:8085/sse
-
-# 2) Initialize MCP session using the endpoint URL
-curl -X POST http://localhost:8085/sse/messages/<sessionId> \
+# 1) Initialize session (returns Mcp-Session-Id header)
+curl -i -X POST http://localhost:8085/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":"1","method":"initialize","params":{}}'
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"test","version":"1.0"}}}'
 
-# 3) List tools
-curl -X POST http://localhost:8085/sse/messages/<sessionId> \
+# 2) List tools
+curl -X POST http://localhost:8085/mcp \
   -H "Content-Type: application/json" \
-  -d '{"jsonrpc":"2.0","id":"2","method":"tools/list","params":{}}'
+  -H "Accept: application/json, text/event-stream" \
+  -H "Mcp-Session-Id: <session-id>" \
+  -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
 
 <details>
