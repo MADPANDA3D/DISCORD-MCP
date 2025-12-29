@@ -85,9 +85,17 @@ async def get_dm_channel(user_id: str) -> discord.DMChannel:
 
 
 @mcp.tool()
-async def get_server_info(guild_id: str | None = None) -> str:
+async def get_server_info(guild_id: str = "") -> str:
     guild = await get_guild(guild_id)
-    owner = await guild.fetch_owner()
+    owner_name = "unknown"
+    if guild.owner is not None:
+        owner_name = guild.owner.name
+    elif guild.owner_id:
+        try:
+            owner_member = await guild.fetch_member(guild.owner_id)
+            owner_name = owner_member.name
+        except Exception:
+            owner_name = f"ID {guild.owner_id}"
     creation_date = guild.created_at.astimezone(timezone.utc).date().isoformat()
     boost_count = guild.premium_subscription_count or 0
     boost_tier = str(guild.premium_tier)
@@ -95,7 +103,7 @@ async def get_server_info(guild_id: str | None = None) -> str:
     return "\n".join([
         f"Server Name: {guild.name}",
         f"Server ID: {guild.id}",
-        f"Owner: {owner.name}",
+        f"Owner: {owner_name}",
         f"Created On: {creation_date}",
         f"Members: {guild.member_count}",
         "Channels: ",
@@ -140,7 +148,7 @@ async def delete_message(channel_id: str, message_id: str) -> str:
 
 
 @mcp.tool()
-async def read_messages(channel_id: str, count: str | None = None) -> str:
+async def read_messages(channel_id: str, count: str = "") -> str:
     channel = await get_text_channel(channel_id)
     limit = int(count) if count else 100
     messages = [m async for m in channel.history(limit=limit)]
@@ -177,7 +185,7 @@ async def remove_reaction(channel_id: str, message_id: str, emoji: str) -> str:
 
 
 @mcp.tool()
-async def get_user_id_by_name(username: str, guild_id: str | None = None) -> str:
+async def get_user_id_by_name(username: str, guild_id: str = "") -> str:
     if not username:
         raise ValueError("username cannot be null")
     guild = await get_guild(guild_id)
@@ -240,7 +248,7 @@ async def delete_private_message(user_id: str, message_id: str) -> str:
 
 
 @mcp.tool()
-async def read_private_messages(user_id: str, count: str | None = None) -> str:
+async def read_private_messages(user_id: str, count: str = "") -> str:
     dm = await get_dm_channel(user_id)
     limit = int(count) if count else 100
     messages = [m async for m in dm.history(limit=limit)]
@@ -253,7 +261,7 @@ async def read_private_messages(user_id: str, count: str | None = None) -> str:
 
 
 @mcp.tool()
-async def create_text_channel(guild_id: str | None, name: str, category_id: str | None = None) -> str:
+async def create_text_channel(name: str, guild_id: str = "", category_id: str = "") -> str:
     if not name:
         raise ValueError("name cannot be null")
     guild = await get_guild(guild_id)
@@ -271,7 +279,7 @@ async def create_text_channel(guild_id: str | None, name: str, category_id: str 
 
 
 @mcp.tool()
-async def delete_channel(guild_id: str | None, channel_id: str) -> str:
+async def delete_channel(channel_id: str, guild_id: str = "") -> str:
     guild = await get_guild(guild_id)
     channel = guild.get_channel(int(channel_id))
     if channel is None:
@@ -285,7 +293,7 @@ async def delete_channel(guild_id: str | None, channel_id: str) -> str:
 
 
 @mcp.tool()
-async def find_channel(guild_id: str | None, channel_name: str) -> str:
+async def find_channel(channel_name: str, guild_id: str = "") -> str:
     if not channel_name:
         raise ValueError("channelName cannot be null")
     guild = await get_guild(guild_id)
@@ -302,7 +310,7 @@ async def find_channel(guild_id: str | None, channel_name: str) -> str:
 
 
 @mcp.tool()
-async def list_channels(guild_id: str | None = None) -> str:
+async def list_channels(guild_id: str = "") -> str:
     guild = await get_guild(guild_id)
     channels = guild.channels
     if not channels:
@@ -314,7 +322,7 @@ async def list_channels(guild_id: str | None = None) -> str:
 
 
 @mcp.tool()
-async def create_category(guild_id: str | None, name: str) -> str:
+async def create_category(name: str, guild_id: str = "") -> str:
     if not name:
         raise ValueError("name cannot be null")
     guild = await get_guild(guild_id)
@@ -323,7 +331,7 @@ async def create_category(guild_id: str | None, name: str) -> str:
 
 
 @mcp.tool()
-async def delete_category(guild_id: str | None, category_id: str) -> str:
+async def delete_category(category_id: str, guild_id: str = "") -> str:
     guild = await get_guild(guild_id)
     category = discord.utils.get(guild.categories, id=int(category_id))
     if category is None:
@@ -336,7 +344,7 @@ async def delete_category(guild_id: str | None, category_id: str) -> str:
 
 
 @mcp.tool()
-async def find_category(guild_id: str | None, category_name: str) -> str:
+async def find_category(category_name: str, guild_id: str = "") -> str:
     if not category_name:
         raise ValueError("categoryName cannot be null")
     guild = await get_guild(guild_id)
@@ -354,7 +362,7 @@ async def find_category(guild_id: str | None, category_name: str) -> str:
 
 
 @mcp.tool()
-async def list_channels_in_category(guild_id: str | None, category_id: str) -> str:
+async def list_channels_in_category(category_id: str, guild_id: str = "") -> str:
     guild = await get_guild(guild_id)
     category = discord.utils.get(guild.categories, id=int(category_id))
     if category is None:
