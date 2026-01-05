@@ -114,6 +114,19 @@ def normalize_channel_key(value: str) -> str:
     return "".join(ch for ch in value.lower().strip() if ch.isalnum())
 
 
+async def reset_bot(reason: str):
+    global bot, bot_task
+    old_bot = bot
+    if old_bot is not None and not old_bot.is_closed():
+        try:
+            await old_bot.close()
+        except Exception:
+            pass
+    bot = create_bot()
+    bot_task = None
+    logger.warning("bot_reset reason=%s", reason)
+
+
 async def get_cached_channels(
     guild: discord.Guild, force_refresh: bool = False
 ) -> tuple[list, dict, dict]:
@@ -508,16 +521,34 @@ def is_http_session_closed(client: commands.Bot) -> bool:
 
 async def get_client() -> commands.Bot:
     global bot, bot_task
-    if bot is not None and bot.is_ready():
+    if bot is not None and bot.is_ready() and not is_http_session_closed(bot):
         return bot
     async with bot_lock:
+        if bot_task is not None and bot_task.done():
+            try:
+                exc = bot_task.exception()
+            except Exception as exc:
+                exc = exc
+            if exc:
+                logger.warning("bot_task_failed err=%s", exc)
+                await reset_bot("bot_task_failed")
         if bot is None or bot.is_closed() or is_http_session_closed(bot):
-            bot = create_bot()
-            bot_task = None
+            await reset_bot("bot_closed_or_session")
         if bot_task is None or bot_task.done():
             bot_task = asyncio.create_task(bot.start(DISCORD_TOKEN))
     await bot.wait_until_ready()
     return bot
+
+
+async def ensure_client_ready(retry: int = 1) -> commands.Bot:
+    try:
+        return await get_client()
+    except Exception as exc:
+        if retry <= 0:
+            raise
+        logger.warning("ensure_client_retry err=%s", exc)
+        await reset_bot("ensure_client_retry")
+        return await get_client()
 
 
 async def get_bot_member(guild: discord.Guild) -> discord.Member | None:
@@ -1157,7 +1188,35 @@ async def discord_smoke_test(
         "channel_id": None,
     }
 
+    init_errors = []
+    client = None
+    for attempt in range(2):
+        try:
+            client = await ensure_client_ready()
+            break
+        except Exception as exc:
+            init_errors.append(str(exc))
+            if attempt == 0:
+                await reset_bot("smoke_test_init_retry")
+    report["steps"].append(
+        {
+            "name": "client_init",
+            "ok": client is not None,
+            "errors": init_errors,
+        }
+    )
+    if client is None:
+        report["ok"] = False
+        report["duration_ms"] = int((time.perf_counter() - start_time) * 1000)
+        return report
+
     health = await discord_health_check()
+    if not health.get("ok") and any(
+        "properly initialised" in warning for warning in health.get("warnings", [])
+    ):
+        await reset_bot("smoke_test_health_retry")
+        await ensure_client_ready()
+        health = await discord_health_check()
     report["steps"].append(
         {
             "name": "health_check",
