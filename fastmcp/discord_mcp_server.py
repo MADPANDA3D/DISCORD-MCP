@@ -128,21 +128,29 @@ async def reset_bot(reason: str):
 
 
 async def wait_until_ready_safe(
-    client: commands.Bot, retries: int = 5, delay_seconds: float = 0.2
+    client: commands.Bot,
+    timeout_seconds: float = 8.0,
+    poll_interval: float = 0.2,
 ):
+    deadline = time.monotonic() + timeout_seconds
     last_exc = None
-    for _ in range(retries):
-        try:
-            await client.wait_until_ready()
+    while time.monotonic() < deadline:
+        if client.is_ready():
             return
+        try:
+            await asyncio.wait_for(client.wait_until_ready(), timeout=poll_interval)
+            return
+        except asyncio.TimeoutError:
+            continue
         except discord.ClientException as exc:
             last_exc = exc
             if "properly initialised" in str(exc):
-                await asyncio.sleep(delay_seconds)
+                await asyncio.sleep(poll_interval)
                 continue
             raise
     if last_exc:
         raise last_exc
+    raise discord.ClientException("Client did not become ready before timeout")
 
 
 async def get_cached_channels(
