@@ -133,23 +133,17 @@ async def wait_until_ready_safe(
     poll_interval: float = 0.2,
 ):
     deadline = time.monotonic() + timeout_seconds
-    last_exc = None
     while time.monotonic() < deadline:
         if client.is_ready():
             return
-        try:
-            await asyncio.wait_for(client.wait_until_ready(), timeout=poll_interval)
-            return
-        except asyncio.TimeoutError:
-            continue
-        except discord.ClientException as exc:
-            last_exc = exc
-            if "properly initialised" in str(exc):
-                await asyncio.sleep(poll_interval)
+        ready_event = getattr(client, "_ready", None)
+        if ready_event is not None:
+            try:
+                await asyncio.wait_for(ready_event.wait(), timeout=poll_interval)
+                return
+            except asyncio.TimeoutError:
                 continue
-            raise
-    if last_exc:
-        raise last_exc
+        await asyncio.sleep(poll_interval)
     raise discord.ClientException("Client did not become ready before timeout")
 
 
@@ -578,18 +572,24 @@ async def ensure_client_ready(retry: int = 1) -> commands.Bot:
 
 
 def get_client_debug_snapshot() -> dict:
+    ready_event = getattr(bot, "_ready", None) if bot is not None else None
     snapshot = {
         "client_id": id(bot) if bot is not None else None,
+        "client_module": bot.__class__.__module__ if bot is not None else None,
         "is_ready": bot.is_ready() if bot is not None else False,
         "is_closed": bot.is_closed() if bot is not None else True,
         "session_closed": is_http_session_closed(bot) if bot is not None else None,
         "lock_locked": bot_lock.locked(),
+        "ready_event_exists": ready_event is not None,
+        "ready_event_set": ready_event.is_set() if ready_event is not None else None,
     }
     if bot_task is None:
         snapshot["task_state"] = "none"
+        snapshot["task_id"] = None
     else:
         snapshot["task_state"] = "done" if bot_task.done() else "running"
         snapshot["task_cancelled"] = bot_task.cancelled()
+        snapshot["task_id"] = id(bot_task)
         if bot_task.done():
             try:
                 exc = bot_task.exception()
