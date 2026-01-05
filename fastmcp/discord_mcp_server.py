@@ -78,6 +78,15 @@ def parse_int(value, default=None):
         return None
 
 
+CHANNEL_CACHE_TTL_SECONDS = parse_int(
+    os.getenv("DISCORD_CHANNEL_CACHE_TTL_SECONDS", "600"), 600
+)
+if CHANNEL_CACHE_TTL_SECONDS is None or CHANNEL_CACHE_TTL_SECONDS <= 0:
+    CHANNEL_CACHE_TTL_SECONDS = 600
+CHANNEL_CACHE = {}
+CHANNEL_CACHE_LOCK = asyncio.Lock()
+
+
 def parse_snowflake(value) -> int | None:
     if value is None:
         return None
@@ -95,6 +104,51 @@ def parse_snowflake(value) -> int | None:
 
 def normalize_channel_key(value: str) -> str:
     return "".join(ch for ch in value.lower().strip() if ch.isalnum())
+
+
+async def get_cached_channels(
+    guild: discord.Guild, force_refresh: bool = False
+) -> tuple[list, dict, dict]:
+    now = time.time()
+    cached = CHANNEL_CACHE.get(guild.id)
+    if (
+        cached
+        and cached["expires_at"] > now
+        and not force_refresh
+        and cached["channels"]
+    ):
+        return cached["channels"], cached["name_map"], cached["normalized_map"]
+
+    async with CHANNEL_CACHE_LOCK:
+        cached = CHANNEL_CACHE.get(guild.id)
+        if (
+            cached
+            and cached["expires_at"] > now
+            and not force_refresh
+            and cached["channels"]
+        ):
+            return cached["channels"], cached["name_map"], cached["normalized_map"]
+        try:
+            channels = await guild.fetch_channels()
+            record_api_success("fetch_channels")
+        except Exception as exc:
+            logger.warning("channel_cache_refresh_failed guild_id=%s err=%s", guild.id, exc)
+            channels = list(guild.channels)
+        name_map = {}
+        normalized_map = {}
+        for channel in channels:
+            name_lower = channel.name.lower()
+            name_map.setdefault(name_lower, []).append(channel)
+            normalized_key = normalize_channel_key(channel.name)
+            if normalized_key:
+                normalized_map.setdefault(normalized_key, []).append(channel)
+        CHANNEL_CACHE[guild.id] = {
+            "channels": channels,
+            "name_map": name_map,
+            "normalized_map": normalized_map,
+            "expires_at": now + CHANNEL_CACHE_TTL_SECONDS,
+        }
+        return channels, name_map, normalized_map
 
 
 def parse_allowed_channel_ids(raw: str) -> tuple[bool, set[int], list[str]]:
@@ -119,6 +173,27 @@ def parse_allowed_channel_ids(raw: str) -> tuple[bool, set[int], list[str]]:
         else:
             ids.add(parsed)
     return False, ids, warnings
+
+
+def split_text(text: str, limit: int) -> list[str]:
+    if text is None:
+        return []
+    remaining = str(text)
+    if not remaining:
+        return []
+    parts = []
+    while remaining:
+        if len(remaining) <= limit:
+            parts.append(remaining)
+            break
+        split_at = remaining.rfind("\n", 0, limit + 1)
+        if split_at > 0:
+            split_at += 1
+        else:
+            split_at = limit
+        parts.append(remaining[:split_at])
+        remaining = remaining[split_at:]
+    return parts
 
 
 PRIMARY_CHANNEL_ID = parse_snowflake(DISCORD_PRIMARY_CHANNEL_ID_RAW)
@@ -496,6 +571,7 @@ async def discord_health_check(guild_id: str = "") -> dict:
         "max_message_chars": 2000,
         "thread_ops_enabled": True,
         "health_check_sample_limit": HEALTH_CHECK_SAMPLE_LIMIT,
+        "channel_cache_ttl_seconds": CHANNEL_CACHE_TTL_SECONDS,
     }
 
     if PRIMARY_CHANNEL_ID is not None and ALLOWED_CHANNEL_IDS and (
@@ -645,6 +721,8 @@ async def send_message(
     embed_description: str = "",
     embed_color: str = "",
     dry_run: bool | str = False,
+    thread_if_split: bool | str = False,
+    thread_name: str = "",
 ) -> dict:
     start_time = time.perf_counter()
     resolved_channel_id = None
@@ -680,7 +758,6 @@ async def send_message(
             )
 
         channel = await get_text_channel(resolved_channel_id)
-        client = await get_client()
         member = await get_bot_member(channel.guild)
         perms = (
             channel.permissions_for(member)
@@ -707,11 +784,19 @@ async def send_message(
                 channel_id=resolved_channel_id,
             )
 
-        embed = None
+        thread_if_split = parse_bool(thread_if_split)
+        thread_name = (thread_name or "").strip()
+
         has_embed = bool(embed_title or embed_description or embed_color)
         embed_title_length = len(embed_title) if embed_title else 0
         embed_description_length = len(embed_description) if embed_description else 0
         content_length = len(message) if message else 0
+        content_parts = split_text(message, 2000) if message else []
+        embed_parts = split_text(embed_description, 4096) if embed_description else []
+        planned_parts = max(len(content_parts), len(embed_parts), 1)
+        will_split = planned_parts > 1
+        warnings = []
+
         diagnostics.update(
             {
                 "content_length": content_length,
@@ -721,43 +806,16 @@ async def send_message(
                 "embed_description_length": embed_description_length,
                 "embed_description_limit": 4096,
                 "embeds_allowed": perms.embed_links,
+                "planned_parts": planned_parts,
+                "will_split": will_split,
+                "thread_if_split": thread_if_split,
             }
         )
 
-        if content_length > 2000:
-            error = error_response(
-                "invalid_payload",
-                "message exceeds 2000 characters.",
-                guild_id=channel.guild.id,
-                channel_id=resolved_channel_id,
-                diagnostics=diagnostics,
-            )
-            return error_with_log(
-                "send_message",
-                start_time,
-                error,
-                guild_id=channel.guild.id,
-                channel_id=resolved_channel_id,
-            )
         if embed_title_length > 256:
             error = error_response(
                 "invalid_payload",
                 "embed_title exceeds 256 characters.",
-                guild_id=channel.guild.id,
-                channel_id=resolved_channel_id,
-                diagnostics=diagnostics,
-            )
-            return error_with_log(
-                "send_message",
-                start_time,
-                error,
-                guild_id=channel.guild.id,
-                channel_id=resolved_channel_id,
-            )
-        if embed_description_length > 4096:
-            error = error_response(
-                "invalid_payload",
-                "embed_description exceeds 4096 characters.",
                 guild_id=channel.guild.id,
                 channel_id=resolved_channel_id,
                 diagnostics=diagnostics,
@@ -786,6 +844,84 @@ async def send_message(
                 channel_id=resolved_channel_id,
             )
 
+        color_value = None
+        if embed_color:
+            color_value = parse_int(embed_color)
+            if color_value is None:
+                error = error_response(
+                    "invalid_payload",
+                    "embed_color must be an integer.",
+                    guild_id=channel.guild.id,
+                    channel_id=resolved_channel_id,
+                    diagnostics=diagnostics,
+                )
+                return error_with_log(
+                    "send_message",
+                    start_time,
+                    error,
+                    guild_id=channel.guild.id,
+                    channel_id=resolved_channel_id,
+                )
+
+        parts = []
+        for idx in range(planned_parts):
+            content_part = content_parts[idx] if idx < len(content_parts) else ""
+            embed_title_part = ""
+            embed_desc_part = ""
+            include_embed = False
+            if embed_parts:
+                if idx < len(embed_parts):
+                    embed_desc_part = embed_parts[idx]
+                    embed_title_part = embed_title
+                    include_embed = bool(embed_title_part or embed_desc_part or embed_color)
+            else:
+                if idx == 0 and has_embed:
+                    embed_title_part = embed_title
+                    embed_desc_part = embed_description
+                    include_embed = True
+            parts.append(
+                {
+                    "content": content_part,
+                    "embed_title": embed_title_part,
+                    "embed_description": embed_desc_part,
+                    "include_embed": include_embed,
+                }
+            )
+
+        thread_planned = thread_if_split and will_split and caps["create_threads"]
+        if thread_if_split and will_split and not caps["create_threads"]:
+            warnings.append("create_threads permission missing; falling back to channel.")
+        if thread_planned and not thread_name:
+            if embed_title:
+                thread_name = embed_title.strip()
+            elif message:
+                thread_name = "MCP continuation"
+            else:
+                thread_name = "MCP continuation"
+        if thread_name and len(thread_name) > 90:
+            thread_name = thread_name[:90]
+
+        split_strategy = "thread" if thread_planned else "channel"
+        parts_plan = [
+            {
+                "index": idx + 1,
+                "content_length": len(part["content"]) if part["content"] else 0,
+                "embed_description_length": len(part["embed_description"])
+                if part["embed_description"]
+                else 0,
+                "has_embed": part["include_embed"],
+            }
+            for idx, part in enumerate(parts)
+        ]
+        diagnostics.update(
+            {
+                "split_strategy": split_strategy,
+                "thread_planned": thread_planned,
+                "thread_name": thread_name or None,
+                "parts": parts_plan,
+            }
+        )
+
         if dry_run:
             log_action(
                 "send_message",
@@ -793,36 +929,46 @@ async def send_message(
                 "ok",
                 channel_id=resolved_channel_id,
             )
-            return success_response(dry_run=True, **diagnostics)
+            return success_response(dry_run=True, warnings=warnings, **diagnostics)
 
-        if has_embed:
-            embed = discord.Embed(
-                title=embed_title or None,
-                description=embed_description or None,
-            )
-            if embed_color:
-                color_value = parse_int(embed_color)
-                if color_value is None:
-                    error = error_response(
-                        "invalid_payload",
-                        "embed_color must be an integer.",
-                        guild_id=channel.guild.id,
-                        channel_id=resolved_channel_id,
-                        diagnostics=diagnostics,
-                    )
-                    return error_with_log(
-                        "send_message",
-                        start_time,
-                        error,
-                        guild_id=channel.guild.id,
-                        channel_id=resolved_channel_id,
-                    )
-                embed.color = discord.Color(color_value)
+        sent_message_ids = []
+        sent_message = None
+        thread_id = None
+        target_channel = channel
+        for idx, part in enumerate(parts):
+            embed = None
+            if part["include_embed"]:
+                embed = discord.Embed(
+                    title=part["embed_title"] or None,
+                    description=part["embed_description"] or None,
+                )
+                if color_value is not None:
+                    embed.color = discord.Color(color_value)
+            if idx == 0:
+                sent_message = await channel.send(
+                    content=part["content"] or None,
+                    embed=embed,
+                )
+                sent_message_ids.append(str(sent_message.id))
+                if thread_planned and sent_message is not None:
+                    try:
+                        thread = await sent_message.create_thread(
+                            name=thread_name or "MCP continuation"
+                        )
+                        record_api_success("create_thread")
+                        thread_id = str(thread.id)
+                        target_channel = thread
+                    except Exception as exc:
+                        warnings.append(f"Thread creation failed: {exc}")
+                        thread_planned = False
+                        target_channel = channel
+            else:
+                sent = await target_channel.send(
+                    content=part["content"] or None,
+                    embed=embed,
+                )
+                sent_message_ids.append(str(sent.id))
 
-        sent_message = await channel.send(
-            content=message or None,
-            embed=embed,
-        )
         record_api_success("send_message")
         log_action(
             "send_message",
@@ -833,8 +979,12 @@ async def send_message(
         )
         return success_response(
             channel_id=str(channel.id),
-            message_id=str(sent_message.id),
-            jump_url=sent_message.jump_url,
+            message_id=str(sent_message.id) if sent_message else None,
+            sent_message_ids=sent_message_ids,
+            thread_id=thread_id,
+            jump_url=sent_message.jump_url if sent_message else None,
+            warnings=warnings,
+            planned_parts=planned_parts,
         )
     except Exception as exc:
         error = exception_to_error(
@@ -844,6 +994,143 @@ async def send_message(
         return error_with_log(
             "send_message", start_time, error, channel_id=resolved_channel_id
         )
+
+
+@mcp.tool()
+async def discord_smoke_test(
+    channel_id: str = "",
+    include_admin: bool | str = True,
+) -> dict:
+    start_time = time.perf_counter()
+    include_admin = parse_bool(include_admin)
+    report = {
+        "ok": True,
+        "steps": [],
+        "message_id": None,
+        "channel_id": None,
+    }
+
+    health = await discord_health_check()
+    report["steps"].append(
+        {
+            "name": "health_check",
+            "ok": bool(health.get("ok")),
+            "status": health.get("status"),
+            "warnings": health.get("warnings", []),
+        }
+    )
+    if not health.get("ok"):
+        report["ok"] = False
+
+    test_message = f"MCP smoke test {datetime.now(timezone.utc).isoformat()}"
+    dry_run = await send_message(
+        channel_id=channel_id,
+        message=test_message,
+        dry_run=True,
+    )
+    report["steps"].append(
+        {
+            "name": "dry_run_send",
+            "ok": bool(dry_run.get("ok")),
+            "details": dry_run,
+        }
+    )
+    if not dry_run.get("ok"):
+        report["ok"] = False
+        report["duration_ms"] = int((time.perf_counter() - start_time) * 1000)
+        return report
+
+    send = await send_message(
+        channel_id=channel_id,
+        message=test_message,
+        dry_run=False,
+    )
+    report["steps"].append(
+        {
+            "name": "real_send",
+            "ok": bool(send.get("ok")),
+            "details": send,
+        }
+    )
+    if not send.get("ok"):
+        report["ok"] = False
+        report["duration_ms"] = int((time.perf_counter() - start_time) * 1000)
+        return report
+
+    report["channel_id"] = send.get("channel_id")
+    message_id = send.get("message_id")
+    if not message_id and send.get("sent_message_ids"):
+        message_id = send.get("sent_message_ids")[0]
+    report["message_id"] = message_id
+
+    should_delete = False
+    if include_admin and MCP_ADMIN_TOOLS_ENABLED and message_id:
+        edit = await edit_message(
+            channel_id=report["channel_id"] or channel_id,
+            message_id=message_id,
+            new_message=f"{test_message} (edited)",
+            confirm=True,
+        )
+        report["steps"].append(
+            {
+                "name": "edit_message",
+                "ok": bool(edit.get("ok")),
+                "details": edit,
+            }
+        )
+        if not edit.get("ok"):
+            report["ok"] = False
+        should_delete = True
+    else:
+        report["steps"].append(
+            {
+                "name": "admin_steps",
+                "ok": True,
+                "details": {
+                    "skipped": True,
+                    "reason": "Admin tools disabled or message_id missing.",
+                },
+            }
+        )
+
+    if message_id:
+        read = await read_messages(
+            channel_id=report["channel_id"] or channel_id, count="5"
+        )
+        found = False
+        if read.get("ok"):
+            for msg in read.get("messages", []):
+                if msg.get("id") == message_id:
+                    found = True
+                    break
+        report["steps"].append(
+            {
+                "name": "read_recent",
+                "ok": bool(read.get("ok")),
+                "found_message": found,
+                "details": read,
+            }
+        )
+        if not read.get("ok") or not found:
+            report["ok"] = False
+    if should_delete:
+        delete = await delete_message(
+            channel_id=report["channel_id"] or channel_id,
+            message_id=message_id,
+            confirm=True,
+        )
+        report["steps"].append(
+            {
+                "name": "delete_message",
+                "ok": bool(delete.get("ok")),
+                "details": delete,
+            }
+        )
+        if not delete.get("ok"):
+            report["ok"] = False
+
+    report["duration_ms"] = int((time.perf_counter() - start_time) * 1000)
+    return report
 
 
 @mcp.tool()
@@ -1377,14 +1664,13 @@ async def find_channel(channel_name: str, guild_id: str = "") -> str:
     query_key = normalize_channel_key(channel_name)
     if not query_key:
         raise ValueError("channelName cannot be null")
-    channels = [c for c in guild.channels if c.name.lower() == channel_name.lower()]
+    channels_list, name_map, normalized_map = await get_cached_channels(guild)
+    channels = name_map.get(channel_name.lower(), [])
+    if not channels:
+        channels = normalized_map.get(query_key, [])
     if not channels:
         channels = [
-            c for c in guild.channels if normalize_channel_key(c.name) == query_key
-        ]
-    if not channels:
-        channels = [
-            c for c in guild.channels if query_key in normalize_channel_key(c.name)
+            c for c in channels_list if query_key in normalize_channel_key(c.name)
         ]
     if not channels:
         raise ValueError(f"No channels found with name {channel_name}")
@@ -1401,7 +1687,7 @@ async def find_channel(channel_name: str, guild_id: str = "") -> str:
 async def list_channels(guild_id: str = "") -> str:
     client = await get_client()
     guild = await get_guild(guild_id, client)
-    channels = guild.channels
+    channels, _, _ = await get_cached_channels(guild)
     if not channels:
         raise ValueError("No channels found by guildId")
     channel_list = "\n".join(

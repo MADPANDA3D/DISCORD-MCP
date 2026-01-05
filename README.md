@@ -56,6 +56,7 @@ Environment variables:
 - `DISCORD_PRIMARY_CHANNEL_ID`: Default channel ID for send/read tools (optional)
 - `DISCORD_ALLOWED_CHANNEL_IDS`: Comma-separated allowlist for send/edit/delete (optional, use `ALL` or `*` to allow all channels)
 - `MCP_ADMIN_TOOLS_ENABLED`: Enable admin-gated edit/delete (requires `confirm=true`)
+- `DISCORD_CHANNEL_CACHE_TTL_SECONDS`: Channel name cache TTL in seconds (optional, default 600)
 
 Docker Compose (recommended):
 ```bash
@@ -204,6 +205,7 @@ claude mcp add mcp-server -- docker run --rm -i -e DISCORD_TOKEN=<YOUR_DISCORD_B
 #### Server Information
  - [`get_server_info`](): Get detailed discord server information
  - [`discord_health_check`](): High-signal health report with status, warnings, permissions, and rate-limit snapshot
+ - [`discord_smoke_test`](): Run health check + dry-run + send + optional edit/delete + read-back
 
 #### User Management
 - [`get_user_id_by_name`](): Get a Discord user's ID by username in a guild for ping usage `<@id>`
@@ -213,7 +215,7 @@ claude mcp add mcp-server -- docker run --rm -i -e DISCORD_TOKEN=<YOUR_DISCORD_B
 - [`read_private_messages`](): Read recent message history from a specific user
 
 #### Message Management
- - [`send_message`](): Send a message to a specific channel (supports `dry_run`, optional embeds)
+ - [`send_message`](): Send a message to a specific channel (supports `dry_run`, optional embeds, auto-splitting, and `thread_if_split`)
  - [`edit_message`](): Edit a message (requires `MCP_ADMIN_TOOLS_ENABLED=true` and `confirm=true`)
  - [`delete_message`](): Delete a message (requires `MCP_ADMIN_TOOLS_ENABLED=true` and `confirm=true`)
  - [`read_messages`](): Read recent message history (supports `before_message_id`)
