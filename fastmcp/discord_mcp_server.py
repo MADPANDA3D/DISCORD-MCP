@@ -127,6 +127,24 @@ async def reset_bot(reason: str):
     logger.warning("bot_reset reason=%s", reason)
 
 
+async def wait_until_ready_safe(
+    client: commands.Bot, retries: int = 5, delay_seconds: float = 0.2
+):
+    last_exc = None
+    for _ in range(retries):
+        try:
+            await client.wait_until_ready()
+            return
+        except discord.ClientException as exc:
+            last_exc = exc
+            if "properly initialised" in str(exc):
+                await asyncio.sleep(delay_seconds)
+                continue
+            raise
+    if last_exc:
+        raise last_exc
+
+
 async def get_cached_channels(
     guild: discord.Guild, force_refresh: bool = False
 ) -> tuple[list, dict, dict]:
@@ -536,7 +554,7 @@ async def get_client() -> commands.Bot:
             await reset_bot("bot_closed_or_session")
         if bot_task is None or bot_task.done():
             bot_task = asyncio.create_task(bot.start(DISCORD_TOKEN))
-    await bot.wait_until_ready()
+    await wait_until_ready_safe(bot)
     return bot
 
 
@@ -549,6 +567,28 @@ async def ensure_client_ready(retry: int = 1) -> commands.Bot:
         logger.warning("ensure_client_retry err=%s", exc)
         await reset_bot("ensure_client_retry")
         return await get_client()
+
+
+def get_client_debug_snapshot() -> dict:
+    snapshot = {
+        "client_id": id(bot) if bot is not None else None,
+        "is_ready": bot.is_ready() if bot is not None else False,
+        "is_closed": bot.is_closed() if bot is not None else True,
+        "session_closed": is_http_session_closed(bot) if bot is not None else None,
+        "lock_locked": bot_lock.locked(),
+    }
+    if bot_task is None:
+        snapshot["task_state"] = "none"
+    else:
+        snapshot["task_state"] = "done" if bot_task.done() else "running"
+        snapshot["task_cancelled"] = bot_task.cancelled()
+        if bot_task.done():
+            try:
+                exc = bot_task.exception()
+            except Exception as exc:
+                exc = exc
+            snapshot["task_exception"] = str(exc) if exc else None
+    return snapshot
 
 
 async def get_bot_member(guild: discord.Guild) -> discord.Member | None:
@@ -1178,9 +1218,11 @@ async def send_message(
 async def discord_smoke_test(
     channel_id: str = "",
     include_admin: bool | str = True,
+    debug: bool | str = False,
 ) -> dict:
     start_time = time.perf_counter()
     include_admin = parse_bool(include_admin)
+    debug = parse_bool(debug)
     report = {
         "ok": True,
         "steps": [],
@@ -1198,11 +1240,13 @@ async def discord_smoke_test(
             init_errors.append(str(exc))
             if attempt == 0:
                 await reset_bot("smoke_test_init_retry")
+    client_snapshot = get_client_debug_snapshot() if debug else None
     report["steps"].append(
         {
             "name": "client_init",
             "ok": client is not None,
             "errors": init_errors,
+            "debug": client_snapshot,
         }
     )
     if client is None:
