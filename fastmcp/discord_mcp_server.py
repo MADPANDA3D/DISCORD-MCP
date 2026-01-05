@@ -93,38 +93,62 @@ def parse_snowflake(value) -> int | None:
     return None
 
 
-def parse_snowflake_list(raw: str) -> tuple[set[int], list[str]]:
+def normalize_channel_key(value: str) -> str:
+    return "".join(ch for ch in value.lower().strip() if ch.isalnum())
+
+
+def parse_allowed_channel_ids(raw: str) -> tuple[bool, set[int], list[str]]:
     ids = set()
     warnings = []
     if not raw:
-        return ids, warnings
-    for part in raw.split(","):
-        cleaned = part.strip()
-        if not cleaned:
-            continue
-        parsed = parse_snowflake(cleaned)
+        return False, ids, warnings
+    parts = [part.strip() for part in raw.split(",") if part.strip()]
+    for part in parts:
+        if part.lower() in ("all", "*"):
+            if len(parts) > 1:
+                warnings.append(
+                    "DISCORD_ALLOWED_CHANNEL_IDS includes ALL with specific IDs; using ALL."
+                )
+            return True, set(), warnings
+    for part in parts:
+        parsed = parse_snowflake(part)
         if parsed is None:
             warnings.append(
-                f"Invalid channel id in DISCORD_ALLOWED_CHANNEL_IDS: {cleaned}"
+                f"Invalid channel id in DISCORD_ALLOWED_CHANNEL_IDS: {part}"
             )
         else:
             ids.add(parsed)
-    return ids, warnings
+    return False, ids, warnings
 
 
 PRIMARY_CHANNEL_ID = parse_snowflake(DISCORD_PRIMARY_CHANNEL_ID_RAW)
 if DISCORD_PRIMARY_CHANNEL_ID_RAW and PRIMARY_CHANNEL_ID is None:
     CONFIG_WARNINGS.append("Invalid DISCORD_PRIMARY_CHANNEL_ID configured.")
-ALLOWED_CHANNEL_IDS, allowlist_warnings = parse_snowflake_list(
+ALLOW_ALL_CHANNELS, ALLOWED_CHANNEL_IDS, allowlist_warnings = parse_allowed_channel_ids(
     DISCORD_ALLOWED_CHANNEL_IDS_RAW
 )
 CONFIG_WARNINGS.extend(allowlist_warnings)
 
 
-def effective_allowed_channel_ids() -> set[int]:
-    ids = set(ALLOWED_CHANNEL_IDS)
+HEALTH_CHECK_SAMPLE_LIMIT = 5
+
+
+def effective_allowed_channel_ids(guild: discord.Guild | None = None) -> list[int]:
+    ids = []
     if PRIMARY_CHANNEL_ID is not None:
-        ids.add(PRIMARY_CHANNEL_ID)
+        ids.append(PRIMARY_CHANNEL_ID)
+    if ALLOW_ALL_CHANNELS:
+        if guild is not None:
+            sample_count = 0
+            for channel in guild.text_channels:
+                if channel.id in ids:
+                    continue
+                ids.append(channel.id)
+                sample_count += 1
+                if sample_count >= HEALTH_CHECK_SAMPLE_LIMIT:
+                    break
+        return ids
+    ids.extend(sorted(ALLOWED_CHANNEL_IDS))
     return ids
 
 
@@ -142,6 +166,8 @@ def resolve_channel_id(channel_id) -> int:
 
 
 def is_channel_allowed(channel_id: int) -> bool:
+    if ALLOW_ALL_CHANNELS:
+        return True
     if not ALLOWED_CHANNEL_IDS:
         return True
     if PRIMARY_CHANNEL_ID is not None and channel_id == PRIMARY_CHANNEL_ID:
@@ -339,12 +365,12 @@ def is_http_session_closed(client: commands.Bot) -> bool:
 
 async def get_client() -> commands.Bot:
     global bot, bot_task
-    if bot is None or bot.is_closed() or is_http_session_closed(bot):
-        bot = create_bot()
-        bot_task = None
-    if bot.is_ready():
+    if bot is not None and bot.is_ready():
         return bot
     async with bot_lock:
+        if bot is None or bot.is_closed() or is_http_session_closed(bot):
+            bot = create_bot()
+            bot_task = None
         if bot_task is None or bot_task.done():
             bot_task = asyncio.create_task(bot.start(DISCORD_TOKEN))
     await bot.wait_until_ready()
@@ -376,8 +402,11 @@ def resolve_guild_id(guild_id: str | None) -> int:
     return parsed
 
 
-async def get_guild(guild_id: str | None) -> discord.Guild:
-    client = await get_client()
+async def get_guild(
+    guild_id: str | None, client: commands.Bot | None = None
+) -> discord.Guild:
+    if client is None:
+        client = await get_client()
     resolved_id = resolve_guild_id(guild_id)
     guild = client.get_guild(resolved_id)
     if guild is None:
@@ -453,16 +482,20 @@ async def discord_health_check(guild_id: str = "") -> dict:
     bot_info = {"user": None, "application": None}
     primary_ok = False
     any_allowed_ok = False
-    effective_allowed = effective_allowed_channel_ids()
+    effective_allowed = []
     discord_config = {
         "primary_channel_id": (
             str(PRIMARY_CHANNEL_ID) if PRIMARY_CHANNEL_ID is not None else None
         ),
-        "allowed_channel_ids": [str(cid) for cid in sorted(ALLOWED_CHANNEL_IDS)],
+        "allowed_channel_ids": (
+            ["ALL"] if ALLOW_ALL_CHANNELS else [str(cid) for cid in sorted(ALLOWED_CHANNEL_IDS)]
+        ),
+        "allow_all_channels": ALLOW_ALL_CHANNELS,
         "admin_tools_enabled": MCP_ADMIN_TOOLS_ENABLED,
         "max_embed_chars": 4096,
         "max_message_chars": 2000,
         "thread_ops_enabled": True,
+        "health_check_sample_limit": HEALTH_CHECK_SAMPLE_LIMIT,
     }
 
     if PRIMARY_CHANNEL_ID is not None and ALLOWED_CHANNEL_IDS and (
@@ -472,7 +505,7 @@ async def discord_health_check(guild_id: str = "") -> dict:
             "DISCORD_PRIMARY_CHANNEL_ID is not in DISCORD_ALLOWED_CHANNEL_IDS; "
             "primary channel will still be used for defaults."
         )
-    if not ALLOWED_CHANNEL_IDS:
+    if not ALLOW_ALL_CHANNELS and not ALLOWED_CHANNEL_IDS:
         warnings.append("DISCORD_ALLOWED_CHANNEL_IDS is not configured.")
 
     try:
@@ -496,6 +529,7 @@ async def discord_health_check(guild_id: str = "") -> dict:
         except Exception:
             warnings.append("Unable to fetch application info.")
 
+        guild = None
         if guild_id or DEFAULT_GUILD_ID:
             try:
                 guild = await get_guild(guild_id)
@@ -509,8 +543,14 @@ async def discord_health_check(guild_id: str = "") -> dict:
         else:
             warnings.append("DISCORD_GUILD_ID not set; guild checks skipped.")
 
+        if ALLOW_ALL_CHANNELS and guild is None:
+            warnings.append("Allow-all enabled but guild unavailable for sampling.")
+
+        effective_allowed = effective_allowed_channel_ids(
+            guild if guild_info["found"] else None
+        )
         if not effective_allowed:
-            warnings.append("No primary or allowed channels configured for checks.")
+            warnings.append("No channels available for capability checks.")
         for channel_id in sorted(effective_allowed):
             try:
                 channel = await get_text_channel(channel_id)
@@ -528,16 +568,17 @@ async def discord_health_check(guild_id: str = "") -> dict:
                     warnings.append(
                         f"Primary channel {channel_id} lacks read_history/send permission."
                     )
-                if channel_id in ALLOWED_CHANNEL_IDS and (
-                    not caps["read_history"] or not caps["send"]
+                if (not caps["read_history"] or not caps["send"]) and (
+                    ALLOW_ALL_CHANNELS or channel_id in ALLOWED_CHANNEL_IDS
                 ):
+                    label = "Sample channel" if ALLOW_ALL_CHANNELS else "Allowed channel"
                     warnings.append(
-                        f"Allowed channel {channel_id} lacks read_history/send permission."
+                        f"{label} {channel_id} lacks read_history/send permission."
                     )
                 if caps["read_history"] and caps["send"]:
                     if PRIMARY_CHANNEL_ID is not None and channel_id == PRIMARY_CHANNEL_ID:
                         primary_ok = True
-                    if channel_id in ALLOWED_CHANNEL_IDS:
+                    if ALLOW_ALL_CHANNELS or channel_id in ALLOWED_CHANNEL_IDS:
                         any_allowed_ok = True
             except Exception as exc:
                 capabilities[str(channel_id)] = {"found": False, "error": str(exc)}
@@ -545,7 +586,7 @@ async def discord_health_check(guild_id: str = "") -> dict:
 
         if PRIMARY_CHANNEL_ID is not None:
             ok = primary_ok
-        elif ALLOWED_CHANNEL_IDS:
+        elif ALLOW_ALL_CHANNELS or ALLOWED_CHANNEL_IDS:
             ok = any_allowed_ok
         else:
             ok = False
@@ -566,7 +607,11 @@ async def discord_health_check(guild_id: str = "") -> dict:
             "primary_channel_id": (
                 str(PRIMARY_CHANNEL_ID) if PRIMARY_CHANNEL_ID is not None else None
             ),
-            "allowed_channel_ids": [str(cid) for cid in sorted(ALLOWED_CHANNEL_IDS)],
+            "allowed_channel_ids": (
+                ["ALL"]
+                if ALLOW_ALL_CHANNELS
+                else [str(cid) for cid in sorted(ALLOWED_CHANNEL_IDS)]
+            ),
             "admin_tools_enabled": MCP_ADMIN_TOOLS_ENABLED,
             "discord_config": discord_config,
             "capabilities": capabilities,
@@ -635,6 +680,7 @@ async def send_message(
             )
 
         channel = await get_text_channel(resolved_channel_id)
+        client = await get_client()
         member = await get_bot_member(channel.guild)
         perms = (
             channel.permissions_for(member)
@@ -885,7 +931,7 @@ async def edit_message(
                 channel_id=resolved_channel_id,
             )
 
-        if msg.author.id != bot.user.id and not perms.manage_messages:
+        if client.user and msg.author.id != client.user.id and not perms.manage_messages:
             error = error_response(
                 "permission_denied",
                 "Missing permission to manage messages.",
@@ -974,6 +1020,7 @@ async def delete_message(
         }
 
         channel = await get_text_channel(resolved_channel_id)
+        client = await get_client()
         member = await get_bot_member(channel.guild)
         perms = (
             channel.permissions_for(member)
@@ -999,7 +1046,7 @@ async def delete_message(
                 channel_id=resolved_channel_id,
             )
 
-        if msg.author.id != bot.user.id and not perms.manage_messages:
+        if client.user and msg.author.id != client.user.id and not perms.manage_messages:
             error = error_response(
                 "permission_denied",
                 "Missing permission to manage messages.",
@@ -1205,10 +1252,11 @@ async def remove_reaction(channel_id: str, message_id: str, emoji: str) -> str:
     if not emoji:
         raise ValueError("emoji cannot be null")
     channel = await get_text_channel(channel_id)
+    client = await get_client()
     msg = await channel.fetch_message(int(message_id))
     if msg is None:
         raise ValueError("Message not found by messageId")
-    await msg.remove_reaction(emoji, bot.user)
+    await msg.remove_reaction(emoji, client.user)
     return f"Removed reaction successfully. Message link: {msg.jump_url}"
 
 
@@ -1324,8 +1372,20 @@ async def delete_channel(channel_id: str, guild_id: str = "") -> str:
 async def find_channel(channel_name: str, guild_id: str = "") -> str:
     if not channel_name:
         raise ValueError("channelName cannot be null")
-    guild = await get_guild(guild_id)
+    client = await get_client()
+    guild = await get_guild(guild_id, client)
+    query_key = normalize_channel_key(channel_name)
+    if not query_key:
+        raise ValueError("channelName cannot be null")
     channels = [c for c in guild.channels if c.name.lower() == channel_name.lower()]
+    if not channels:
+        channels = [
+            c for c in guild.channels if normalize_channel_key(c.name) == query_key
+        ]
+    if not channels:
+        channels = [
+            c for c in guild.channels if query_key in normalize_channel_key(c.name)
+        ]
     if not channels:
         raise ValueError(f"No channels found with name {channel_name}")
     if len(channels) > 1:
@@ -1339,7 +1399,8 @@ async def find_channel(channel_name: str, guild_id: str = "") -> str:
 
 @mcp.tool()
 async def list_channels(guild_id: str = "") -> str:
-    guild = await get_guild(guild_id)
+    client = await get_client()
+    guild = await get_guild(guild_id, client)
     channels = guild.channels
     if not channels:
         raise ValueError("No channels found by guildId")

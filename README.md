@@ -54,7 +54,7 @@ Environment variables:
 - `DISCORD_TOKEN`: Discord bot token (required)
 - `DISCORD_GUILD_ID`: Default guild/server ID (optional)
 - `DISCORD_PRIMARY_CHANNEL_ID`: Default channel ID for send/read tools (optional)
-- `DISCORD_ALLOWED_CHANNEL_IDS`: Comma-separated allowlist for send/edit/delete (optional)
+- `DISCORD_ALLOWED_CHANNEL_IDS`: Comma-separated allowlist for send/edit/delete (optional, use `ALL` or `*` to allow all channels)
 - `MCP_ADMIN_TOOLS_ENABLED`: Enable admin-gated edit/delete (requires `confirm=true`)
 
 Docker Compose (recommended):
@@ -226,7 +226,7 @@ claude mcp add mcp-server -- docker run --rm -i -e DISCORD_TOKEN=<YOUR_DISCORD_B
 #### Channel Management
  - [`create_text_channel`](): Create text a channel
  - [`delete_channel`](): Delete a channel
- - [`find_channel`](): Find a channel type and ID using name and server ID
+ - [`find_channel`](): Find a channel type and ID using name (supports emoji/prefix-insensitive matches)
  - [`list_channels`](): List of all channels
 
 #### Category Management
