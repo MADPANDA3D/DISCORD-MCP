@@ -976,6 +976,7 @@ async def send_message(
             )
 
         channel = await get_text_channel(resolved_channel_id)
+        client = await get_client()
         member = await get_bot_member(channel.guild)
         perms = (
             channel.permissions_for(member)
