@@ -57,6 +57,7 @@ Environment variables:
 - `DISCORD_ALLOWED_CHANNEL_IDS`: Comma-separated allowlist for send/edit/delete (optional, use `ALL` or `*` to allow all channels)
 - `MCP_ADMIN_TOOLS_ENABLED`: Enable admin-gated edit/delete (requires `confirm=true`)
 - `DISCORD_CHANNEL_CACHE_TTL_SECONDS`: Channel name cache TTL in seconds (optional, default 600)
+- `DISCORD_JOB_TTL_SECONDS`: Async job retention TTL in seconds (optional, default 3600)
 
 Docker Compose (recommended):
 ```bash
@@ -206,6 +207,11 @@ claude mcp add mcp-server -- docker run --rm -i -e DISCORD_TOKEN=<YOUR_DISCORD_B
  - [`get_server_info`](): Get detailed discord server information
  - [`discord_health_check`](): High-signal health report with status, warnings, permissions, and rate-limit snapshot
  - [`discord_smoke_test`](): Run health check + dry-run + send + optional edit/delete + read-back
+
+#### Operations
+ - [`discord_ack`](): Post a standardized acknowledgement message to a channel/thread
+ - [`discord_job_submit`](): Submit an async job (returns `task_id`)
+ - [`discord_job_status`](): Check async job status and optional result
 
 #### User Management
 - [`get_user_id_by_name`](): Get a Discord user's ID by username in a guild for ping usage `<@id>`

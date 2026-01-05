@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import time
+import uuid
 from datetime import datetime, timezone
 
 import aiohttp
@@ -86,6 +87,13 @@ if CHANNEL_CACHE_TTL_SECONDS is None or CHANNEL_CACHE_TTL_SECONDS <= 0:
 CHANNEL_CACHE = {}
 CHANNEL_CACHE_LOCK = asyncio.Lock()
 
+JOB_TTL_SECONDS = parse_int(os.getenv("DISCORD_JOB_TTL_SECONDS", "3600"), 3600)
+if JOB_TTL_SECONDS is None or JOB_TTL_SECONDS <= 0:
+    JOB_TTL_SECONDS = 3600
+JOB_STORE = {}
+JOB_TASKS = {}
+JOB_LOCK = asyncio.Lock()
+
 
 def parse_snowflake(value) -> int | None:
     if value is None:
@@ -149,6 +157,66 @@ async def get_cached_channels(
             "expires_at": now + CHANNEL_CACHE_TTL_SECONDS,
         }
         return channels, name_map, normalized_map
+
+
+def job_timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+async def prune_jobs_locked(now: float | None = None):
+    if now is None:
+        now = time.time()
+    expired = []
+    for job_id, job in JOB_STORE.items():
+        finished_at_ts = job.get("finished_at_ts")
+        if finished_at_ts and now - finished_at_ts > JOB_TTL_SECONDS:
+            expired.append(job_id)
+    for job_id in expired:
+        JOB_STORE.pop(job_id, None)
+        JOB_TASKS.pop(job_id, None)
+
+
+def build_job_snapshot(job: dict, include_result: bool = False) -> dict:
+    snapshot = {
+        "task_id": job.get("task_id"),
+        "action": job.get("action"),
+        "status": job.get("status"),
+        "created_at": job.get("created_at"),
+        "started_at": job.get("started_at"),
+        "finished_at": job.get("finished_at"),
+        "error": job.get("error"),
+    }
+    if include_result:
+        snapshot["result"] = job.get("result")
+    return snapshot
+
+
+async def run_job(job_id: str, action_name: str, action_func, params: dict):
+    async with JOB_LOCK:
+        job = JOB_STORE.get(job_id)
+        if not job:
+            return
+        job["status"] = "running"
+        job["started_at"] = job_timestamp()
+        job["started_at_ts"] = time.time()
+    try:
+        result = await action_func(**params)
+        ok = not (isinstance(result, dict) and result.get("ok") is False)
+        status = "succeeded" if ok else "failed"
+        error = None if ok else result
+    except Exception as exc:
+        result = None
+        status = "failed"
+        error = exception_to_error(exc)
+    async with JOB_LOCK:
+        job = JOB_STORE.get(job_id)
+        if job:
+            job["status"] = status
+            job["finished_at"] = job_timestamp()
+            job["finished_at_ts"] = time.time()
+            job["result"] = result
+            job["error"] = error
+        JOB_TASKS.pop(job_id, None)
 
 
 def parse_allowed_channel_ids(raw: str) -> tuple[bool, set[int], list[str]]:
@@ -506,6 +574,31 @@ async def get_text_channel(channel_id: int | str) -> discord.TextChannel:
     return channel
 
 
+async def get_message_target(channel_id: int | str):
+    client = await get_client()
+    resolved_id = parse_snowflake(channel_id)
+    if resolved_id is None:
+        raise ValueError("channelId cannot be null")
+    channel = client.get_channel(resolved_id)
+    if channel is None:
+        channel = await client.fetch_channel(resolved_id)
+        record_api_success("fetch_channel")
+    if channel is None or not hasattr(channel, "send"):
+        raise ValueError("Channel is not messageable")
+    return channel
+
+
+def is_message_target_allowed(channel) -> bool:
+    if ALLOW_ALL_CHANNELS or not ALLOWED_CHANNEL_IDS:
+        return True
+    if isinstance(channel, discord.Thread):
+        parent_id = channel.parent_id
+        if parent_id:
+            return is_channel_allowed(parent_id)
+        return False
+    return is_channel_allowed(channel.id)
+
+
 async def get_dm_channel(user_id: str) -> discord.DMChannel:
     client = await get_client()
     if not user_id:
@@ -572,6 +665,7 @@ async def discord_health_check(guild_id: str = "") -> dict:
         "thread_ops_enabled": True,
         "health_check_sample_limit": HEALTH_CHECK_SAMPLE_LIMIT,
         "channel_cache_ttl_seconds": CHANNEL_CACHE_TTL_SECONDS,
+        "job_ttl_seconds": JOB_TTL_SECONDS,
     }
 
     if PRIMARY_CHANNEL_ID is not None and ALLOWED_CHANNEL_IDS and (
@@ -711,6 +805,59 @@ async def discord_health_check(guild_id: str = "") -> dict:
         }
         log_action("discord_health_check", start_time, "error", error_type="invalid_payload")
         return response
+
+
+@mcp.tool()
+async def discord_ack(
+    channel_id: str = "",
+    message: str = "",
+    include_timestamp: bool | str = True,
+) -> dict:
+    start_time = time.perf_counter()
+    resolved_channel_id = None
+    try:
+        include_timestamp = parse_bool(include_timestamp)
+        resolved_channel_id = resolve_channel_id(channel_id)
+        ack_message = message.strip() if message else "On it - running checks now."
+        if include_timestamp:
+            ack_message = f"{ack_message} ({datetime.now(timezone.utc).isoformat()})"
+
+        target = await get_message_target(resolved_channel_id)
+        allowed = is_message_target_allowed(target)
+        diagnostics = {
+            "resolved_channel_id": str(resolved_channel_id),
+            "allowed_channel": allowed,
+        }
+        if not allowed and not MCP_ADMIN_TOOLS_ENABLED:
+            error = error_response(
+                "permission_denied",
+                "Channel is not in allowlist.",
+                channel_id=resolved_channel_id,
+                required_perms=["allowlisted_channel"],
+                diagnostics=diagnostics,
+            )
+            return error_with_log(
+                "discord_ack", start_time, error, channel_id=resolved_channel_id
+            )
+
+        sent = await target.send(ack_message)
+        record_api_success("discord_ack")
+        log_action(
+            "discord_ack",
+            start_time,
+            "ok",
+            channel_id=resolved_channel_id,
+        )
+        return success_response(
+            channel_id=str(target.id),
+            message_id=str(sent.id),
+            jump_url=sent.jump_url,
+        )
+    except Exception as exc:
+        error = exception_to_error(exc, channel_id=resolved_channel_id)
+        return error_with_log(
+            "discord_ack", start_time, error, channel_id=resolved_channel_id
+        )
 
 
 @mcp.tool()
@@ -1131,6 +1278,89 @@ async def discord_smoke_test(
 
     report["duration_ms"] = int((time.perf_counter() - start_time) * 1000)
     return report
+
+
+@mcp.tool()
+async def discord_job_submit(action: str, params: dict | None = None) -> dict:
+    start_time = time.perf_counter()
+    if not action:
+        error = error_response("invalid_payload", "action cannot be null.")
+        return error_with_log("discord_job_submit", start_time, error)
+    if params is None:
+        params = {}
+    if not isinstance(params, dict):
+        error = error_response("invalid_payload", "params must be an object.")
+        return error_with_log("discord_job_submit", start_time, error)
+
+    action_map = {
+        "discord_health_check": discord_health_check,
+        "discord_smoke_test": discord_smoke_test,
+        "discord_ack": discord_ack,
+        "get_server_info": get_server_info,
+        "list_channels": list_channels,
+        "find_channel": find_channel,
+        "read_messages": read_messages,
+        "list_threads": list_threads,
+        "send_message": send_message,
+    }
+    action_func = action_map.get(action)
+    if action_func is None:
+        error = error_response(
+            "invalid_payload",
+            "Unsupported action.",
+            diagnostics={"supported_actions": sorted(action_map.keys())},
+        )
+        return error_with_log("discord_job_submit", start_time, error)
+
+    job_id = str(uuid.uuid4())
+    now = time.time()
+    job = {
+        "task_id": job_id,
+        "action": action,
+        "status": "queued",
+        "created_at": job_timestamp(),
+        "created_at_ts": now,
+        "params": params,
+        "result": None,
+        "error": None,
+        "started_at": None,
+        "finished_at": None,
+        "finished_at_ts": None,
+    }
+    async with JOB_LOCK:
+        await prune_jobs_locked(now)
+        JOB_STORE[job_id] = job
+        task = asyncio.create_task(run_job(job_id, action, action_func, params))
+        JOB_TASKS[job_id] = task
+
+    log_action("discord_job_submit", start_time, "ok")
+    return success_response(
+        task_id=job_id,
+        status="queued",
+        action=action,
+    )
+
+
+@mcp.tool()
+async def discord_job_status(
+    task_id: str,
+    include_result: bool | str = False,
+) -> dict:
+    start_time = time.perf_counter()
+    include_result = parse_bool(include_result)
+    if not task_id:
+        error = error_response("invalid_payload", "task_id cannot be null.")
+        return error_with_log("discord_job_status", start_time, error)
+    async with JOB_LOCK:
+        await prune_jobs_locked()
+        job = JOB_STORE.get(task_id)
+        if job is None:
+            error = error_response("not_found", "Job not found.")
+            return error_with_log("discord_job_status", start_time, error)
+        snapshot = build_job_snapshot(job, include_result)
+
+    log_action("discord_job_status", start_time, "ok")
+    return success_response(**snapshot)
 
 
 @mcp.tool()
