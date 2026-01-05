@@ -53,6 +53,9 @@ The recommended HTTP transport is the FastMCP server in `fastmcp/`. It exposes a
 Environment variables:
 - `DISCORD_TOKEN`: Discord bot token (required)
 - `DISCORD_GUILD_ID`: Default guild/server ID (optional)
+- `DISCORD_PRIMARY_CHANNEL_ID`: Default channel ID for send/read tools (optional)
+- `DISCORD_ALLOWED_CHANNEL_IDS`: Comma-separated allowlist for send/edit/delete (optional)
+- `MCP_ADMIN_TOOLS_ENABLED`: Enable admin-gated edit/delete (requires `confirm=true`)
 
 Docker Compose (recommended):
 ```bash
@@ -200,6 +203,7 @@ claude mcp add mcp-server -- docker run --rm -i -e DISCORD_TOKEN=<YOUR_DISCORD_B
 
 #### Server Information
  - [`get_server_info`](): Get detailed discord server information
+ - [`discord_health_check`](): High-signal health report with status, warnings, permissions, and rate-limit snapshot
 
 #### User Management
 - [`get_user_id_by_name`](): Get a Discord user's ID by username in a guild for ping usage `<@id>`
@@ -209,12 +213,15 @@ claude mcp add mcp-server -- docker run --rm -i -e DISCORD_TOKEN=<YOUR_DISCORD_B
 - [`read_private_messages`](): Read recent message history from a specific user
 
 #### Message Management
- - [`send_message`](): Send a message to a specific channel
- - [`edit_message`](): Edit a message from a specific channel
- - [`delete_message`](): Delete a message from a specific channel
- - [`read_messages`](): Read recent message history from a specific channel
+ - [`send_message`](): Send a message to a specific channel (supports `dry_run`, optional embeds)
+ - [`edit_message`](): Edit a message (requires `MCP_ADMIN_TOOLS_ENABLED=true` and `confirm=true`)
+ - [`delete_message`](): Delete a message (requires `MCP_ADMIN_TOOLS_ENABLED=true` and `confirm=true`)
+ - [`read_messages`](): Read recent message history (supports `before_message_id`)
  - [`add_reaction`](): Add a reaction (emoji) to a specific message
  - [`remove_reaction`](): Remove a specified reaction (emoji) from a message
+
+#### Thread Management
+ - [`list_threads`](): List active (and optionally archived) threads for a channel
 
 #### Channel Management
  - [`create_text_channel`](): Create text a channel
@@ -235,6 +242,7 @@ claude mcp add mcp-server -- docker run --rm -i -e DISCORD_TOKEN=<YOUR_DISCORD_B
  - [`send_webhook_message`](): Send a message via webhook
 
 >If `DISCORD_GUILD_ID` is set, the `guildId` parameter becomes optional for all tools above.
+>If `DISCORD_PRIMARY_CHANNEL_ID` is set, `channel_id` becomes optional for send/read tools. When `DISCORD_ALLOWED_CHANNEL_IDS` is set, send/edit/delete are restricted to that allowlist unless admin override is enabled.
 
 <hr>
 
