@@ -32,11 +32,19 @@ logger = logging.getLogger("discord_mcp")
 if not DISCORD_TOKEN:
     raise RuntimeError("DISCORD_TOKEN is not set")
 
-intents = discord.Intents.default()
-intents.members = True
-intents.message_content = True
 
-bot = commands.Bot(command_prefix="!", intents=intents)
+def build_intents() -> discord.Intents:
+    intents = discord.Intents.default()
+    intents.members = True
+    intents.message_content = True
+    return intents
+
+
+def create_bot() -> commands.Bot:
+    return commands.Bot(command_prefix="!", intents=build_intents())
+
+
+bot = create_bot()
 mcp = FastMCP(
     name="discord-mcp",
     stateless_http=True,
@@ -323,27 +331,38 @@ def channel_capabilities(perms: discord.Permissions) -> dict:
     }
 
 
-async def get_bot_member(guild: discord.Guild) -> discord.Member | None:
-    if bot.user is None:
-        return None
-    member = guild.get_member(bot.user.id)
-    if member is None:
-        try:
-            member = await guild.fetch_member(bot.user.id)
-            record_api_success("fetch_member")
-        except discord.NotFound:
-            return None
-    return member
+def is_http_session_closed(client: commands.Bot) -> bool:
+    http = getattr(client, "http", None)
+    session = getattr(http, "_session", None)
+    return bool(session is not None and getattr(session, "closed", False))
 
 
-async def ensure_ready():
-    global bot_task
+async def get_client() -> commands.Bot:
+    global bot, bot_task
+    if bot is None or bot.is_closed() or is_http_session_closed(bot):
+        bot = create_bot()
+        bot_task = None
     if bot.is_ready():
-        return
+        return bot
     async with bot_lock:
         if bot_task is None or bot_task.done():
             bot_task = asyncio.create_task(bot.start(DISCORD_TOKEN))
     await bot.wait_until_ready()
+    return bot
+
+
+async def get_bot_member(guild: discord.Guild) -> discord.Member | None:
+    client = await get_client()
+    if client.user is None:
+        return None
+    member = guild.get_member(client.user.id)
+    if member is None:
+        try:
+            member = await guild.fetch_member(client.user.id)
+            record_api_success("fetch_member")
+        except discord.NotFound:
+            return None
+    return member
 
 
 def resolve_guild_id(guild_id: str | None) -> int:
@@ -358,11 +377,11 @@ def resolve_guild_id(guild_id: str | None) -> int:
 
 
 async def get_guild(guild_id: str | None) -> discord.Guild:
-    await ensure_ready()
+    client = await get_client()
     resolved_id = resolve_guild_id(guild_id)
-    guild = bot.get_guild(resolved_id)
+    guild = client.get_guild(resolved_id)
     if guild is None:
-        guild = await bot.fetch_guild(resolved_id)
+        guild = await client.fetch_guild(resolved_id)
         record_api_success("fetch_guild")
     if guild is None:
         raise ValueError("Discord server not found by guildId")
@@ -370,13 +389,13 @@ async def get_guild(guild_id: str | None) -> discord.Guild:
 
 
 async def get_text_channel(channel_id: int | str) -> discord.TextChannel:
-    await ensure_ready()
+    client = await get_client()
     resolved_id = parse_snowflake(channel_id)
     if resolved_id is None:
         raise ValueError("channelId cannot be null")
-    channel = bot.get_channel(resolved_id)
+    channel = client.get_channel(resolved_id)
     if channel is None:
-        channel = await bot.fetch_channel(resolved_id)
+        channel = await client.fetch_channel(resolved_id)
         record_api_success("fetch_channel")
     if not isinstance(channel, discord.TextChannel):
         raise ValueError("Channel not found by channelId")
@@ -384,10 +403,10 @@ async def get_text_channel(channel_id: int | str) -> discord.TextChannel:
 
 
 async def get_dm_channel(user_id: str) -> discord.DMChannel:
-    await ensure_ready()
+    client = await get_client()
     if not user_id:
         raise ValueError("userId cannot be null")
-    user = await bot.fetch_user(int(user_id))
+    user = await client.fetch_user(int(user_id))
     if user is None:
         raise ValueError("User not found by userId")
     return await user.create_dm()
@@ -435,6 +454,16 @@ async def discord_health_check(guild_id: str = "") -> dict:
     primary_ok = False
     any_allowed_ok = False
     effective_allowed = effective_allowed_channel_ids()
+    discord_config = {
+        "primary_channel_id": (
+            str(PRIMARY_CHANNEL_ID) if PRIMARY_CHANNEL_ID is not None else None
+        ),
+        "allowed_channel_ids": [str(cid) for cid in sorted(ALLOWED_CHANNEL_IDS)],
+        "admin_tools_enabled": MCP_ADMIN_TOOLS_ENABLED,
+        "max_embed_chars": 4096,
+        "max_message_chars": 2000,
+        "thread_ops_enabled": True,
+    }
 
     if PRIMARY_CHANNEL_ID is not None and ALLOWED_CHANNEL_IDS and (
         PRIMARY_CHANNEL_ID not in ALLOWED_CHANNEL_IDS
@@ -447,18 +476,18 @@ async def discord_health_check(guild_id: str = "") -> dict:
         warnings.append("DISCORD_ALLOWED_CHANNEL_IDS is not configured.")
 
     try:
-        await ensure_ready()
-        if bot.user:
+        client = await get_client()
+        if client.user:
             bot_info["user"] = {
-                "id": str(bot.user.id),
-                "name": bot.user.name,
-                "discriminator": bot.user.discriminator,
-                "global_name": bot.user.global_name,
+                "id": str(client.user.id),
+                "name": client.user.name,
+                "discriminator": client.user.discriminator,
+                "global_name": client.user.global_name,
             }
         else:
             warnings.append("Bot user is not ready yet.")
         try:
-            app_info = await bot.application_info()
+            app_info = await client.application_info()
             record_api_success("application_info")
             bot_info["application"] = {
                 "id": str(app_info.id),
@@ -539,6 +568,7 @@ async def discord_health_check(guild_id: str = "") -> dict:
             ),
             "allowed_channel_ids": [str(cid) for cid in sorted(ALLOWED_CHANNEL_IDS)],
             "admin_tools_enabled": MCP_ADMIN_TOOLS_ENABLED,
+            "discord_config": discord_config,
             "capabilities": capabilities,
             "rate_limit": get_rate_limit_snapshot(),
             "last_successful_api_at": LAST_SUCCESSFUL_API_AT,
@@ -554,6 +584,7 @@ async def discord_health_check(guild_id: str = "") -> dict:
             "bot": bot_info,
             "guild": guild_info,
             "capabilities": capabilities,
+            "discord_config": discord_config,
             "rate_limit": get_rate_limit_snapshot(),
             "last_successful_api_at": LAST_SUCCESSFUL_API_AT,
         }
@@ -1386,8 +1417,8 @@ async def create_webhook(channel_id: str, name: str) -> str:
 
 @mcp.tool()
 async def delete_webhook(webhook_id: str) -> str:
-    await ensure_ready()
-    webhook = await bot.fetch_webhook(int(webhook_id))
+    client = await get_client()
+    webhook = await client.fetch_webhook(int(webhook_id))
     if webhook is None:
         raise ValueError("Webhook not found by webhookId")
     name = webhook.name
