@@ -25,7 +25,8 @@
 - If you add tests, place Java tests under `src/test/java` and Python tests under `fastmcp/tests`, then document the run command here.
 
 ## Commit & Pull Request Guidelines
-- Commit messages use short, imperative subjects (e.g., “Fix FastMCP port mapping”); avoid scopes/prefixes unless needed.
+- Commit messages must follow Conventional Commits (enforced by commitlint in CI); e.g., `feat: add webhook audit`, `fix(fastmcp): handle header overrides`.
+- Keep subjects short and imperative; include a scope only when it adds clarity.
 - PRs should include: clear summary, linked issue (if any), steps to verify, and notes on any environment variable or config changes.
 - Update `README.md` when behavior or deployment steps change.
 
@@ -39,3 +40,4 @@
 - Use GitHub MCP for all GitHub actions (commits, pushes, PRs, issues). For large change sets, make local git commits with author name `MADPANDA3D`, then do a final polish commit via GitHub MCP; MCP use can be overridden when explicitly asked.
 - Use Perplexity for open research and Context7 for library/framework documentation.
 - After applying fixes, always rebuild and restart the Docker container (e.g., `docker compose -f fastmcp/docker-compose.yaml up -d --build`).
+- Always use Conventional Commits for local changes; semantic-release relies on commitlint passing.
