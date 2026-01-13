@@ -51,19 +51,35 @@ Enable your AI assistants to seamlessly interact with Discord. Manage channels, 
 The recommended HTTP transport is the FastMCP server in `fastmcp/`. It exposes a single `/mcp` endpoint for GET and POST.
 
 Environment variables:
-- `DISCORD_TOKEN`: Discord bot token (required)
-- `DISCORD_GUILD_ID`: Default guild/server ID (optional)
+- `DISCORD_TOKEN`: Discord bot token (not a user token; required unless using request headers)
+- `DISCORD_GUILD_ID`: Default guild/server ID (required unless using request headers)
 - `DISCORD_PRIMARY_CHANNEL_ID`: Default channel ID for send/read tools (optional)
-- `DISCORD_ALLOWED_CHANNEL_IDS`: Comma-separated allowlist for send/edit/delete (optional, use `ALL` or `*` to allow all channels)
-- `MCP_ADMIN_TOOLS_ENABLED`: Enable admin-gated edit/delete (requires `confirm=true`)
+- `DISCORD_ALLOWED_CHANNEL_IDS`: Comma-separated allowlist for send/edit/delete (optional, use `ALL` or `*` to allow all channels; defaults to allowing all)
+- `DISCORD_BLOCKED_CHANNEL_IDS`: Comma-separated blocklist to disallow reads/writes (optional)
+- `DISCORD_ALLOW_ALL_READ`: Allow reads across all channels (optional)
+- `MCP_ADMIN_TOOLS_ENABLED`: Enable admin-gated edit/delete (requires `confirm="CONFIRM APPLY"`)
+- `DISCORD_DM_ENABLED`: Enable DM tools (optional, default false)
+- `LOG_REDACT_MESSAGE_CONTENT`: Redact message content in logs and job results (optional, default true)
+- `DISCORD_AUDIT_TIMEZONE`: Timezone for audit tools (optional, default `America/Los_Angeles`)
+- `DISCORD_PROTECTED_USER_IDS`: Comma-separated user IDs protected from moderation (optional)
+- `DISCORD_PROTECTED_ROLE_IDS`: Comma-separated role IDs protected from moderation (optional)
+- `DISCORD_ALLOWED_TARGET_ROLE_IDS`: Restrict moderation to members with these roles (optional)
 - `DISCORD_CHANNEL_CACHE_TTL_SECONDS`: Channel name cache TTL in seconds (optional, default 600)
 - `DISCORD_JOB_TTL_SECONDS`: Async job retention TTL in seconds (optional, default 3600)
+- `MCP_ALLOW_REQUEST_OVERRIDES`: Enable per-request headers for public endpoints (optional)
+- `MCP_REQUIRE_REQUEST_DISCORD_TOKEN`: Require bot token header (optional, default follows `MCP_ALLOW_REQUEST_OVERRIDES`)
+- `MCP_REQUIRE_REQUEST_GUILD_ID`: Require guild id header (optional, default follows `MCP_ALLOW_REQUEST_OVERRIDES`)
+- `MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS`: Require blocked channels header (optional, default follows `MCP_ALLOW_REQUEST_OVERRIDES`)
+- `MCP_DISCORD_TOKEN_HEADER`: Header name for bot token (default `x-discord-bot-token`)
+- `MCP_DISCORD_GUILD_ID_HEADER`: Header name for guild id (default `x-discord-guild-id`)
+- `MCP_DISCORD_BLOCKED_CHANNELS_HEADER`: Header name for blocked channels (default `x-discord-blocked-channels`)
+- `MCP_BOT_POOL_TTL_SECONDS`: Idle TTL for bot clients in the pool (optional, default 900)
 
 Docker Compose (recommended):
 ```bash
 cd fastmcp
 cp .env.example .env
-# Edit .env with your DISCORD_TOKEN and DISCORD_GUILD_ID
+# Edit .env with your DISCORD_TOKEN and DISCORD_GUILD_ID (or enable request headers)
 docker-compose up -d --build
 ```
 
@@ -85,6 +101,44 @@ curl -i -X POST http://localhost:8085/mcp \
   -H "Accept: application/json, text/event-stream" \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
+
+### Hosted MCP (Bring Your Own Discord Bot)
+
+If you expose FastMCP publicly, you can require clients to supply **their own bot
+token and guild id** via headers. This lets anyone use the endpoint with their
+own Discord credentials.
+
+Server env (recommended for public endpoints):
+```bash
+MCP_ALLOW_REQUEST_OVERRIDES=true
+MCP_REQUIRE_REQUEST_DISCORD_TOKEN=true
+MCP_REQUIRE_REQUEST_GUILD_ID=true
+MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS=true
+```
+
+Client headers:
+- `X-Discord-Bot-Token`: **Discord bot token** (required, not a user token)
+- `X-Discord-Guild-Id`: guild id (required)
+- `X-Discord-Blocked-Channels`: blocked channel names (required, may be empty)
+
+Blocked channel format: `#channel, #channel` (spaces optional). If a channel
+name does not match, the request still succeeds and a warning is returned.
+
+If required headers are missing, the server returns a JSON-RPC error with
+`type=permission_denied` and `diagnostics.required_headers` listing the
+missing header names.
+
+Example (curl):
+```bash
+curl -i -X POST http://localhost:8085/mcp \
+  -H "Content-Type: application/json" \
+  -H "X-Discord-Bot-Token: <BOT_TOKEN>" \
+  -H "X-Discord-Guild-Id: <GUILD_ID>" \
+  -H "X-Discord-Blocked-Channels: #announcements, #general-conversation" \
+  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send_message","arguments":{"channel_id":"123","message":"Hello","confirm":"CONFIRM APPLY"}}}'
+```
+
+Note: header auth only applies to HTTP transport; STDIO cannot pass headers.
 
 ### VPS Deployment (Nginx Proxy Manager)
 
@@ -220,16 +274,36 @@ claude mcp add mcp-server -- docker run --rm -i -e DISCORD_TOKEN=<YOUR_DISCORD_B
 - [`delete_private_message`](): Delete a private message from a specific user
 - [`read_private_messages`](): Read recent message history from a specific user
 
+#### Moderation (confirm-gated)
+- [`timeout_member`](): Timeout a member for a duration (minutes)
+- [`remove_timeout`](): Remove a timeout from a member
+- [`kick_member`](): Kick a member from the guild
+- [`ban_member`](): Ban a member (optional delete message days)
+- [`unban_member`](): Unban a user
+- [`add_role`](): Add a role to a member
+- [`remove_role`](): Remove a role from a member
+- [`edit_nickname`](): Set or clear a member nickname
+
 #### Message Management
  - [`send_message`](): Send a message to a specific channel (supports `dry_run`, optional embeds, auto-splitting, and `thread_if_split`)
- - [`edit_message`](): Edit a message (requires `MCP_ADMIN_TOOLS_ENABLED=true` and `confirm=true`)
- - [`delete_message`](): Delete a message (requires `MCP_ADMIN_TOOLS_ENABLED=true` and `confirm=true`)
+ - [`edit_message`](): Edit a message (requires `MCP_ADMIN_TOOLS_ENABLED=true` and `confirm="CONFIRM APPLY"`)
+ - [`delete_message`](): Delete a message (requires `MCP_ADMIN_TOOLS_ENABLED=true` and `confirm="CONFIRM APPLY"`)
  - [`read_messages`](): Read recent message history (supports `before_message_id`)
+ - [`search_messages`](): Search messages with filters (limit, author, date range, threads, links/files)
  - [`add_reaction`](): Add a reaction (emoji) to a specific message
  - [`remove_reaction`](): Remove a specified reaction (emoji) from a message
 
 #### Thread Management
  - [`list_threads`](): List active (and optionally archived) threads for a channel
+ - [`create_thread`](): Create a thread from a message
+ - [`archive_thread`](): Archive a thread
+ - [`unarchive_thread`](): Unarchive a thread
+
+#### Audits
+ - [`channel_daily_audit`](): Summarize a single channel for a day
+ - [`daily_audit_job_submit`](): Create a sequential audit job over channels
+ - [`daily_audit_job_status`](): Check audit job status
+ - [`daily_audit_job_next`](): Process the next channel in the audit job
 
 #### Channel Management
  - [`create_text_channel`](): Create text a channel
@@ -249,8 +323,38 @@ claude mcp add mcp-server -- docker run --rm -i -e DISCORD_TOKEN=<YOUR_DISCORD_B
  - [`list_webhooks`](): List of webhooks on a specific channel
  - [`send_webhook_message`](): Send a message via webhook
 
->If `DISCORD_GUILD_ID` is set, the `guildId` parameter becomes optional for all tools above.
->If `DISCORD_PRIMARY_CHANNEL_ID` is set, `channel_id` becomes optional for send/read tools. When `DISCORD_ALLOWED_CHANNEL_IDS` is set, send/edit/delete are restricted to that allowlist unless admin override is enabled.
+>If `DISCORD_GUILD_ID` is set (or `X-Discord-Guild-Id` is provided), the `guildId` parameter becomes optional for all tools above.
+>If `DISCORD_PRIMARY_CHANNEL_ID` is set, `channel_id` becomes optional for send/read tools. By default all channels are writable; use `DISCORD_BLOCKED_CHANNEL_IDS` or `X-Discord-Blocked-Channels` to block specific channels, or set `DISCORD_ALLOWED_CHANNEL_IDS` to enforce an allowlist.
+>All write/noisy tools (including moderation actions) require `confirm="CONFIRM APPLY"`.
+
+#### Examples (FastMCP JSON-RPC)
+
+Timeout a member:
+```json
+{"jsonrpc":"2.0","id":10,"method":"tools/call","params":{"name":"timeout_member","arguments":{"user_id":"123456789012345678","duration_minutes":"30","reason":"Spam","confirm":"CONFIRM APPLY"}}}
+```
+
+Ban a member (delete last 1 day of messages):
+```json
+{"jsonrpc":"2.0","id":11,"method":"tools/call","params":{"name":"ban_member","arguments":{"user_id":"123456789012345678","delete_message_days":"1","reason":"Raid","confirm":"CONFIRM APPLY"}}}
+```
+
+Add a role:
+```json
+{"jsonrpc":"2.0","id":12,"method":"tools/call","params":{"name":"add_role","arguments":{"user_id":"123456789012345678","role_id":"987654321098765432","reason":"Verified","confirm":"CONFIRM APPLY"}}}
+```
+
+Edit nickname (clear by sending empty string):
+```json
+{"jsonrpc":"2.0","id":13,"method":"tools/call","params":{"name":"edit_nickname","arguments":{"user_id":"123456789012345678","nickname":"","reason":"Reset","confirm":"CONFIRM APPLY"}}}
+```
+
+Daily audit job flow (one channel per step):
+```json
+{"jsonrpc":"2.0","id":20,"method":"tools/call","params":{"name":"daily_audit_job_submit","arguments":{"date":"2026-01-12","channel_ids":["1455591724532629627","1411052130709667850"]}}}
+{"jsonrpc":"2.0","id":21,"method":"tools/call","params":{"name":"daily_audit_job_next","arguments":{"task_id":"<task_id_from_submit>","limit":"50"}}}
+{"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"daily_audit_job_status","arguments":{"task_id":"<task_id_from_submit>","include_results":true}}}
+```
 
 <hr>
 
