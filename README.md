@@ -1,93 +1,135 @@
-<div align="center">
-  <img src="assets/img/Discord_MCP_full_logo.svg" width="60%" alt="DeepSeek-V3" />
-</div>
-<hr>
-<div align="center" style="line-height: 1;">
-    <a href="https://github.com/modelcontextprotocol/servers" target="_blank" style="margin: 2px;">
-        <img alt="MCP Server" src="https://badge.mcpx.dev?type=server" style="display: inline-block; vertical-align: middle;"/>
-    </a>
-    <a href="https://smithery.ai/server/@SaseQ/discord-mcp" target="_blank" style="margin: 2px;">
-        <img alt="Smithery Badge" src="https://camo.githubusercontent.com/ee5c6c6dc502821f4d57313b2885f7878af52be14142dd98526ea12aedf9b260/68747470733a2f2f736d6974686572792e61692f62616467652f40646d6f6e74676f6d65727934302f646565707365656b2d6d63702d736572766572" data-canonical-src="https://smithery.ai/server/@SaseQ/discord-mcp" style="display: inline-block; vertical-align: middle;"/>
-    </a>
-    <a href="https://discord.gg/5Uvxe5jteM" target="_blank" style="margin: 2px;">
-        <img alt="Discord" src="https://img.shields.io/discord/936242526120194108?color=7389D8&label&logo=discord&logoColor=ffffff" style="display: inline-block; vertical-align: middle;"/>
-    </a>
-    <a href="https://github.com/SaseQ/discord-mcp/blob/main/LICENSE" target="_blank" style="margin: 2px;">
-        <img alt="MIT License" src="https://img.shields.io/github/license/SaseQ/discord-mcp" style="display: inline-block; vertical-align: middle;"/>
-    </a>
-</div>
+<p align="center">
+  <img src="./assets/brand/header.jpg" alt="MADPANDA3D Discord MCP header" />
+</p>
 
+<p align="center">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="MIT License" /></a>
+  <a href="https://www.java.com/"><img src="https://img.shields.io/badge/Java-17-007396?logo=java&logoColor=white" alt="Java 17" /></a>
+  <a href="https://www.python.org/"><img src="https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white" alt="Python 3.10+" /></a>
+  <a href="https://modelcontextprotocol.io/"><img src="https://img.shields.io/badge/MCP-Server-000000" alt="MCP Server" /></a>
+  <a href="https://discord.com/developers/docs/intro"><img src="https://img.shields.io/badge/Discord-API-5865F2?logo=discord&logoColor=white" alt="Discord API" /></a>
+  <a href="https://github.com/MADPANDA3D/DISCORD-MCP/releases"><img src="https://img.shields.io/github/v/release/MADPANDA3D/DISCORD-MCP?display_name=tag&color=0e8a16" alt="release" /></a>
+  <a href="https://github.com/MADPANDA3D/DISCORD-MCP/issues"><img src="https://img.shields.io/github/issues/MADPANDA3D/DISCORD-MCP?color=ff8c00" alt="open issues" /></a>
+  <a href="https://github.com/MADPANDA3D/DISCORD-MCP"><img src="https://img.shields.io/github/stars/MADPANDA3D/DISCORD-MCP?color=f1c40f" alt="stars" /></a>
+</p>
 
-## 📖 Description
+<h1 align="center"><strong>MADPANDA3D DISCORD MCP</strong></h1>
+<p align="center"><strong>Operate Discord with MCP-native tools</strong></p>
+<p align="center">
+  MADPANDA3D Discord MCP is a production-ready Model Context Protocol server for the Discord API.
+  It blends a Spring Boot JDA core with a FastMCP HTTP transport so agents can automate Discord
+  safely and at scale.
+</p>
+<p align="center">
+  Manage channels, moderate users, schedule audits, and run async jobs without leaving your
+  MCP-compatible client. Built for clean ops, consistent controls, and predictable automation.
+</p>
 
-A [Model Context Protocol (MCP)](https://modelcontextprotocol.io/introduction) server for the Discord API [(JDA)](https://jda.wiki/), 
-allowing seamless integration of Discord Bot with MCP-compatible applications like Claude Desktop.
+## Overview
 
-Enable your AI assistants to seamlessly interact with Discord. Manage channels, send messages, and retrieve server information effortlessly. Enhance your Discord experience with powerful automation capabilities.
+This server supports both STDIO and HTTP streamable transports. The hosted endpoint uses header
+authentication so clients can bring their own Discord bot credentials.
 
+## Hosted MCP (Header Auth)
 
-## 🔬 Installation
+Use the MADPANDA3D hosted endpoint:
 
-### ► 🐳 Docker Installation (Recommended)
-> NOTE: Docker installation is required. Full instructions can be found on [docker.com](https://www.docker.com/products/docker-desktop/).
-```json
-{
-  "mcpServers": {
-    "mcp-server": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i",
-        "-e", "DISCORD_TOKEN=<YOUR_DISCORD_BOT_TOKEN>",
-        "-e", "DISCORD_GUILD_ID=<OPTIONAL_DEFAULT_SERVER_ID>",
-        "saseq/discord-mcp:latest"
-      ]
-    }
-  }
-}
+```
+https://discord--mcp.madpanda3d.com/mcp
 ```
 
-## Streamable HTTP Transport (n8n)
+n8n setup:
 
-The recommended HTTP transport is the FastMCP server in `fastmcp/`. It exposes a single `/mcp` endpoint for GET and POST.
+1. Add **MCP tool node** to your agent.
+2. Add the MCP endpoint URL.
+3. Set **Server transport** to **HTTP streamable**.
+4. Set **Auth** to **Multiple Headers Auth**.
+5. Add headers:
+   - `X-Discord-Bot-Token`
+   - `X-Discord-Guild-Id`
+   - `X-Discord-Blocked-Channels` (required; can be empty)
+6. Save the auth credentials.
+7. Set **Tools to include** -> **All**.
 
-Environment variables:
-- `DISCORD_TOKEN`: Discord bot token (not a user token; required unless using request headers)
-- `DISCORD_GUILD_ID`: Default guild/server ID (required unless using request headers)
-- `DISCORD_PRIMARY_CHANNEL_ID`: Default channel ID for send/read tools (optional)
-- `DISCORD_ALLOWED_CHANNEL_IDS`: Comma-separated allowlist for send/edit/delete (optional, use `ALL` or `*` to allow all channels; defaults to allowing all)
-- `DISCORD_BLOCKED_CHANNEL_IDS`: Comma-separated blocklist to disallow reads/writes (optional)
-- `DISCORD_ALLOW_ALL_READ`: Allow reads across all channels (optional)
-- `MCP_ADMIN_TOOLS_ENABLED`: Enable admin-gated edit/delete (requires `confirm="CONFIRM APPLY"`)
-- `DISCORD_DM_ENABLED`: Enable DM tools (optional, default false)
-- `LOG_REDACT_MESSAGE_CONTENT`: Redact message content in logs and job results (optional, default true)
-- `DISCORD_AUDIT_TIMEZONE`: Timezone for audit tools (optional, default `America/Los_Angeles`)
-- `DISCORD_PROTECTED_USER_IDS`: Comma-separated user IDs protected from moderation (optional)
-- `DISCORD_PROTECTED_ROLE_IDS`: Comma-separated role IDs protected from moderation (optional)
-- `DISCORD_ALLOWED_TARGET_ROLE_IDS`: Restrict moderation to members with these roles (optional)
-- `DISCORD_CHANNEL_CACHE_TTL_SECONDS`: Channel name cache TTL in seconds (optional, default 600)
-- `DISCORD_JOB_TTL_SECONDS`: Async job retention TTL in seconds (optional, default 3600)
-- `MCP_ALLOW_REQUEST_OVERRIDES`: Enable per-request headers for public endpoints (optional)
-- `MCP_REQUIRE_REQUEST_DISCORD_TOKEN`: Require bot token header (optional, default follows `MCP_ALLOW_REQUEST_OVERRIDES`)
-- `MCP_REQUIRE_REQUEST_GUILD_ID`: Require guild id header (optional, default follows `MCP_ALLOW_REQUEST_OVERRIDES`)
-- `MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS`: Require blocked channels header (optional, default follows `MCP_ALLOW_REQUEST_OVERRIDES`)
-- `MCP_DISCORD_TOKEN_HEADER`: Header name for bot token (default `x-discord-bot-token`)
-- `MCP_DISCORD_GUILD_ID_HEADER`: Header name for guild id (default `x-discord-guild-id`)
-- `MCP_DISCORD_BLOCKED_CHANNELS_HEADER`: Header name for blocked channels (default `x-discord-blocked-channels`)
-- `MCP_BOT_POOL_TTL_SECONDS`: Idle TTL for bot clients in the pool (optional, default 900)
+## n8n Setup
 
-Docker Compose (recommended):
+Screenshots below show the MCP node configuration in n8n.
+
+<p align="center">
+  <img src="./assets/n8n/n8n-qdrant-mcp-setup-step1.jpg" alt="n8n MCP setup step 1" width="900" />
+</p>
+<p align="center">
+  <img src="./assets/n8n/n8n-qdrant-mcp-setup-step2.jpg" alt="n8n MCP setup step 2" width="900" />
+</p>
+<p align="center"><em>Step 3 screenshot coming soon.</em></p>
+
+## Deploy
+
+- [![Deploy to VPS](https://img.shields.io/badge/Deploy_to_VPS-Hostinger-blue?style=for-the-badge&logo=linux&logoColor=white)](https://www.hostinger.com/cart?product=vps%3Avps_kvm_4&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a492-531e-70d3-83f5-e28eb919466d)
+
+<details>
+<summary>VPS Deployment (Nginx Proxy Manager)</summary>
+
+Attach the FastMCP container to the same Docker network as Nginx Proxy Manager (usually `npm_default`).
+
+NPM host settings:
+- Forward Hostname/IP: `discord-mcp`
+- Forward Port: `8085`
+- Websockets: ON
+- HTTP/2: OFF
+- Advanced: empty
+
+Then point n8n to:
+- Endpoint: `https://discord--mcp.madpanda3d.com/mcp`
+- Transport: HTTP Streamable
+
+</details>
+
+## Quickstart
+
+<details>
+<summary>FastMCP (Docker Compose)</summary>
+
 ```bash
 cd fastmcp
 cp .env.example .env
-# Edit .env with your DISCORD_TOKEN and DISCORD_GUILD_ID (or enable request headers)
-docker-compose up -d --build
+# Edit .env with your DISCORD_TOKEN and DISCORD_GUILD_ID (or enable header overrides)
+docker compose -f fastmcp/docker-compose.yaml up -d --build
 ```
+
+</details>
+
+<details>
+<summary>FastMCP (Python)</summary>
+
+```bash
+pip install -r fastmcp/requirements.txt
+python fastmcp/discord_mcp_server.py
+```
+
+</details>
+
+<details>
+<summary>Java (Spring Boot)</summary>
+
+```bash
+mvn clean package
+java -jar target/discord-mcp-*.jar
+```
+
+</details>
+
+## HTTP Transport
+
+The FastMCP server in `fastmcp/` exposes a single `/mcp` endpoint for GET and POST.
 
 Endpoints:
 - `GET /mcp` -> SSE stream for server-initiated notifications
 - `POST /mcp` -> JSON-RPC requests (returns JSON or SSE per request)
 
-Example curl flow:
+<details>
+<summary>Example curl flow</summary>
+
 ```bash
 # 1) Initialize session
 curl -i -X POST http://localhost:8085/mcp \
@@ -102,13 +144,162 @@ curl -i -X POST http://localhost:8085/mcp \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}'
 ```
 
+</details>
+
+## Tools
+
+<details>
+<summary>Server Information</summary>
+
+- `get_server_info`: detailed server metadata and permissions
+- `discord_health_check`: status, warnings, permissions, and rate-limit snapshot
+- `discord_smoke_test`: health check + dry-run + send + optional edit/delete + read-back
+
+</details>
+
+<details>
+<summary>Operations</summary>
+
+- `discord_ack`: post standardized acknowledgement messages
+- `discord_job_submit`: submit an async job (returns `task_id`)
+- `discord_job_status`: check async job status and optional result
+
+</details>
+
+<details>
+<summary>User Management</summary>
+
+- `get_user_id_by_name`: resolve a Discord user ID for pings
+- `send_private_message`: send a DM
+- `edit_private_message`: edit a DM
+- `delete_private_message`: delete a DM
+- `read_private_messages`: read recent DM history
+
+</details>
+
+<details>
+<summary>Moderation (confirm-gated)</summary>
+
+- `timeout_member`
+- `remove_timeout`
+- `kick_member`
+- `ban_member`
+- `unban_member`
+- `add_role`
+- `remove_role`
+- `edit_nickname`
+
+</details>
+
+<details>
+<summary>Message Management</summary>
+
+- `send_message`: send messages (supports `dry_run`, embeds, auto-splitting)
+- `edit_message`: edit messages (admin + confirm)
+- `delete_message`: delete messages (admin + confirm)
+- `read_messages`: read recent history
+- `search_messages`: search with filters
+- `add_reaction`: add a reaction
+- `remove_reaction`: remove a reaction
+
+</details>
+
+<details>
+<summary>Thread Management</summary>
+
+- `list_threads`
+- `create_thread`
+- `archive_thread`
+- `unarchive_thread`
+
+</details>
+
+<details>
+<summary>Audits</summary>
+
+- `channel_daily_audit`
+- `daily_audit_job_submit`
+- `daily_audit_job_status`
+- `daily_audit_job_next`
+
+</details>
+
+<details>
+<summary>Channel Management</summary>
+
+- `create_text_channel`
+- `delete_channel`
+- `find_channel`
+- `list_channels`
+
+</details>
+
+<details>
+<summary>Category Management</summary>
+
+- `create_category`
+- `delete_category`
+- `find_category`
+- `list_channels_in_category`
+
+</details>
+
+<details>
+<summary>Webhook Management</summary>
+
+- `create_webhook`
+- `delete_webhook`
+- `list_webhooks`
+- `send_webhook_message`
+
+</details>
+
+## Configuration
+
+<details>
+<summary>Environment Variables</summary>
+
+| Name                            | Description                                                                 | Default Value                     |
+|---------------------------------|-----------------------------------------------------------------------------|-----------------------------------|
+| `DISCORD_TOKEN`                 | Discord bot token (required unless using request headers)                  | None                              |
+| `DISCORD_GUILD_ID`              | Default guild/server ID (required unless using request headers)            | None                              |
+| `DISCORD_PRIMARY_CHANNEL_ID`    | Default channel ID for send/read tools                                     | unset                             |
+| `DISCORD_ALLOWED_CHANNEL_IDS`   | Comma-separated allowlist for send/edit/delete (`ALL` or `*` to allow all) | unset                             |
+| `DISCORD_BLOCKED_CHANNEL_IDS`   | Comma-separated blocklist for reads/writes                                 | unset                             |
+| `DISCORD_ALLOW_ALL_READ`        | Allow reads across all channels                                            | `false`                           |
+| `DISCORD_DM_ENABLED`            | Enable DM tools                                                            | `false`                           |
+| `DISCORD_AUDIT_TIMEZONE`        | Timezone for audit tools                                                   | `America/Los_Angeles`             |
+| `DISCORD_PROTECTED_USER_IDS`    | Comma-separated user IDs protected from moderation                         | unset                             |
+| `DISCORD_PROTECTED_ROLE_IDS`    | Comma-separated role IDs protected from moderation                         | unset                             |
+| `DISCORD_ALLOWED_TARGET_ROLE_IDS` | Restrict moderation to members with these roles                         | unset                             |
+| `DISCORD_CHANNEL_CACHE_TTL_SECONDS` | Channel name cache TTL in seconds                                     | `600`                             |
+| `DISCORD_JOB_TTL_SECONDS`       | Async job retention TTL in seconds                                         | `3600`                            |
+| `MCP_BOT_POOL_TTL_SECONDS`      | Idle TTL for bot clients in the pool                                       | `900`                             |
+| `LOG_LEVEL`                     | Log level                                                                  | `INFO`                            |
+| `LOG_REDACT_MESSAGE_CONTENT`    | Redact message content in logs/results                                     | `true`                            |
+| `MCP_ADMIN_TOOLS_ENABLED`       | Enable admin-gated edit/delete tools                                       | `false`                           |
+| `MCP_HTTP_PORT`                 | HTTP server port                                                          | `8085`                            |
+| `MCP_BIND_ADDRESS`              | HTTP bind address                                                         | `0.0.0.0`                         |
+| `MCP_TRANSPORT`                 | Transport type                                                             | `streamable-http`                 |
+| `MCP_STDIO`                     | Enable STDIO transport                                                     | `false`                           |
+| `MCP_ALLOW_REQUEST_OVERRIDES`   | Enable per-request headers for public endpoints                            | `false`                           |
+| `MCP_REQUIRE_REQUEST_DISCORD_TOKEN` | Require bot token header (if overrides enabled)                        | `false`                           |
+| `MCP_REQUIRE_REQUEST_GUILD_ID`  | Require guild id header (if overrides enabled)                             | `false`                           |
+| `MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS` | Require blocked channels header (if overrides enabled)              | `false`                           |
+| `MCP_DISCORD_TOKEN_HEADER`      | Header name for bot token                                                  | `x-discord-bot-token`             |
+| `MCP_DISCORD_GUILD_ID_HEADER`   | Header name for guild id                                                   | `x-discord-guild-id`              |
+| `MCP_DISCORD_BLOCKED_CHANNELS_HEADER` | Header name for blocked channels                                    | `x-discord-blocked-channels`      |
+
+Note: header auth only applies to HTTP transport; STDIO cannot pass headers.
+
+</details>
+
 ### Hosted MCP (Bring Your Own Discord Bot)
 
-If you expose FastMCP publicly, you can require clients to supply **their own bot
-token and guild id** via headers. This lets anyone use the endpoint with their
-own Discord credentials.
+If you expose FastMCP publicly, require clients to supply their own bot token and guild ID.
 
 Server env (recommended for public endpoints):
+
 ```bash
 MCP_ALLOW_REQUEST_OVERRIDES=true
 MCP_REQUIRE_REQUEST_DISCORD_TOKEN=true
@@ -117,7 +308,7 @@ MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS=true
 ```
 
 Client headers:
-- `X-Discord-Bot-Token`: **Discord bot token** (required, not a user token)
+- `X-Discord-Bot-Token`: Discord bot token (required, not a user token)
 - `X-Discord-Guild-Id`: guild id (required)
 - `X-Discord-Blocked-Channels`: blocked channel names (required, may be empty)
 
@@ -128,206 +319,7 @@ If required headers are missing, the server returns a JSON-RPC error with
 `type=permission_denied` and `diagnostics.required_headers` listing the
 missing header names.
 
-Example (curl):
-```bash
-curl -i -X POST http://localhost:8085/mcp \
-  -H "Content-Type: application/json" \
-  -H "X-Discord-Bot-Token: <BOT_TOKEN>" \
-  -H "X-Discord-Guild-Id: <GUILD_ID>" \
-  -H "X-Discord-Blocked-Channels: #announcements, #general-conversation" \
-  -d '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"send_message","arguments":{"channel_id":"123","message":"Hello","confirm":"CONFIRM APPLY"}}}'
-```
-
-Note: header auth only applies to HTTP transport; STDIO cannot pass headers.
-
-### VPS Deployment (Nginx Proxy Manager)
-
-Attach the FastMCP container to the same Docker network as Nginx Proxy Manager (usually `npm_default`).
-
-NPM host settings:
-- Forward Hostname/IP: `discord-mcp`
-- Forward Port: `8085`
-- Websockets: ON
-- HTTP/2: OFF
-- Advanced: empty
-
-Then point n8n to:
-- Endpoint: `https://discord-mcp.yourdomain.com/mcp`
-- Transport: HTTP Streamable
-
-Hostinger VPS (affiliate links):
-- KVM 1: https://www.hostinger.com/cart?product=vps%3Avps_kvm_1&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=019b3c9f-6443-7070-b054-57dd34af9aba
-- KVM 2: https://www.hostinger.com/cart?product=vps%3Avps_kvm_2&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=019b3c9f-b07b-71be-bd64-00f81c1bdb82
-- KVM 4: https://www.hostinger.com/cart?product=vps%3Avps_kvm_4&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=019b3c9f-d6e0-7180-b425-9c286e86986e
-- KVM 8: https://www.hostinger.com/cart?product=vps%3Avps_kvm_8&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=019b3ca0-15e3-710a-a3c3-51c7d2921f86
-
-<details>
-    <summary style="font-size: 1.35em; font-weight: bold;">
-        🔧 Manual Installation
-    </summary>
-
-#### Clone the repository
-```bash
-git clone https://github.com/SaseQ/discord-mcp
-```
-
-#### Build the project
-> NOTE: Maven installation is required to use the mvn command. Full instructions can be found [here](https://www.baeldung.com/install-maven-on-windows-linux-mac).
-```bash
-cd discord-mcp
-mvn clean package # The jar file will be available in the /target directory
-```
-
-#### Configure AI client
-Many code editors and other AI clients use a configuration file to manage MCP servers.
-
-The Discord MPC server can be configured by adding the following to your configuration file.
-
-> NOTE: You will need to create a Discord Bot token to use this server. Instructions on how to create a Discord Bot token can be found [here](https://discordjs.guide/preparations/setting-up-a-bot-application.html#creating-your-bot).
-```json
-{
-  "mcpServers": {
-    "discord-mcp": {
-      "command": "java",
-      "args": [
-        "-jar",
-        "/absolute/path/to/discord-mcp-0.0.1-SNAPSHOT.jar"
-      ],
-      "env": {
-        "DISCORD_TOKEN": "YOUR_DISCORD_BOT_TOKEN",
-        "DISCORD_GUILD_ID": "OPTIONAL_DEFAULT_SERVER_ID"
-      }
-    }
-  }
-}
-```
-The `DISCORD_GUILD_ID` environment variable is optional. When provided, it sets a default Discord server ID so any tool that accepts a `guildId` parameter can omit it.
-
-</details>
-
-<details>
-    <summary style="font-size: 1.35em; font-weight: bold;">
-        ⚓ Smithery Installation
-    </summary>
-
-Install Discord MCP Server automatically via [Smithery](https://smithery.ai/):
-```bash
-npx -y @smithery/cli@latest install @SaseQ/discord-mcp --client <CLIENT_NAME> --key <YOUR_SMITHERY_KEY>
-```
-
-</details>
-
-<details>
-    <summary style="font-size: 1.35em; font-weight: bold;">
-        🖲 Cursor Installation
-    </summary>
-
-Go to: `Settings` -> `Cursor Settings` -> `MCP` -> `Add new global MCP server`
-
-Pasting the following configuration into your Cursor `~/.cursor/mcp.json` file is the recommended approach. You may also install in a specific project by creating `.cursor/mcp.json` in your project folder. See [Cursor MCP docs](https://docs.cursor.com/context/model-context-protocol) for more info.
-```json
-{
-  "mcpServers": {
-    "mcp-server": {
-      "command": "docker",
-      "args": [
-        "run", "--rm", "-i",
-        "-e", "DISCORD_TOKEN=<YOUR_DISCORD_BOT_TOKEN>",
-        "-e", "DISCORD_GUILD_ID=<OPTIONAL_DEFAULT_SERVER_ID>",
-        "saseq/discord-mcp:latest"
-      ]
-    }
-  }
-}
-```
-
-</details>
-
-<details>
-    <summary style="font-size: 1.35em; font-weight: bold;">
-        ⌨️ Claude Code Installation
-    </summary>
-
-Run this command. See [Claude Code MCP docs](https://docs.anthropic.com/en/docs/agents-and-tools/claude-code/tutorials#set-up-model-context-protocol-mcp) for more info.
-```bash
-claude mcp add mcp-server -- docker run --rm -i -e DISCORD_TOKEN=<YOUR_DISCORD_BOT_TOKEN> -e DISCORD_GUILD_ID=<OPTIONAL_DEFAULT_SERVER_ID> saseq/discord-mcp:latest
-```
-
-</details>
-
-## 🛠️ Available Tools
-
-#### Server Information
- - [`get_server_info`](): Get detailed discord server information
- - [`discord_health_check`](): High-signal health report with status, warnings, permissions, and rate-limit snapshot
- - [`discord_smoke_test`](): Run health check + dry-run + send + optional edit/delete + read-back
-
-#### Operations
- - [`discord_ack`](): Post a standardized acknowledgement message to a channel/thread
- - [`discord_job_submit`](): Submit an async job (returns `task_id`)
- - [`discord_job_status`](): Check async job status and optional result
-
-#### User Management
-- [`get_user_id_by_name`](): Get a Discord user's ID by username in a guild for ping usage `<@id>`
-- [`send_private_message`](): Send a private message to a specific user
-- [`edit_private_message`](): Edit a private message from a specific user
-- [`delete_private_message`](): Delete a private message from a specific user
-- [`read_private_messages`](): Read recent message history from a specific user
-
-#### Moderation (confirm-gated)
-- [`timeout_member`](): Timeout a member for a duration (minutes)
-- [`remove_timeout`](): Remove a timeout from a member
-- [`kick_member`](): Kick a member from the guild
-- [`ban_member`](): Ban a member (optional delete message days)
-- [`unban_member`](): Unban a user
-- [`add_role`](): Add a role to a member
-- [`remove_role`](): Remove a role from a member
-- [`edit_nickname`](): Set or clear a member nickname
-
-#### Message Management
- - [`send_message`](): Send a message to a specific channel (supports `dry_run`, optional embeds, auto-splitting, and `thread_if_split`)
- - [`edit_message`](): Edit a message (requires `MCP_ADMIN_TOOLS_ENABLED=true` and `confirm="CONFIRM APPLY"`)
- - [`delete_message`](): Delete a message (requires `MCP_ADMIN_TOOLS_ENABLED=true` and `confirm="CONFIRM APPLY"`)
- - [`read_messages`](): Read recent message history (supports `before_message_id`)
- - [`search_messages`](): Search messages with filters (limit, author, date range, threads, links/files)
- - [`add_reaction`](): Add a reaction (emoji) to a specific message
- - [`remove_reaction`](): Remove a specified reaction (emoji) from a message
-
-#### Thread Management
- - [`list_threads`](): List active (and optionally archived) threads for a channel
- - [`create_thread`](): Create a thread from a message
- - [`archive_thread`](): Archive a thread
- - [`unarchive_thread`](): Unarchive a thread
-
-#### Audits
- - [`channel_daily_audit`](): Summarize a single channel for a day
- - [`daily_audit_job_submit`](): Create a sequential audit job over channels
- - [`daily_audit_job_status`](): Check audit job status
- - [`daily_audit_job_next`](): Process the next channel in the audit job
-
-#### Channel Management
- - [`create_text_channel`](): Create text a channel
- - [`delete_channel`](): Delete a channel
- - [`find_channel`](): Find a channel type and ID using name (supports emoji/prefix-insensitive matches)
- - [`list_channels`](): List of all channels
-
-#### Category Management
- - [`create_category`](): Create a new category for channels
- - [`delete_category`](): Delete a category
- - [`find_category`](): Find a category ID using name and server ID
- - [`list_channels_in_category`](): List of channels in a specific category
-
-#### Webhook Management
- - [`create_webhook`](): Create a new webhook on a specific channel
- - [`delete_webhook`](): Delete a webhook
- - [`list_webhooks`](): List of webhooks on a specific channel
- - [`send_webhook_message`](): Send a message via webhook
-
->If `DISCORD_GUILD_ID` is set (or `X-Discord-Guild-Id` is provided), the `guildId` parameter becomes optional for all tools above.
->If `DISCORD_PRIMARY_CHANNEL_ID` is set, `channel_id` becomes optional for send/read tools. By default all channels are writable; use `DISCORD_BLOCKED_CHANNEL_IDS` or `X-Discord-Blocked-Channels` to block specific channels, or set `DISCORD_ALLOWED_CHANNEL_IDS` to enforce an allowlist.
->All write/noisy tools (including moderation actions) require `confirm="CONFIRM APPLY"`.
-
-#### Examples (FastMCP JSON-RPC)
+## Examples (FastMCP JSON-RPC)
 
 Timeout a member:
 ```json
@@ -356,6 +348,62 @@ Daily audit job flow (one channel per step):
 {"jsonrpc":"2.0","id":22,"method":"tools/call","params":{"name":"daily_audit_job_status","arguments":{"task_id":"<task_id_from_submit>","include_results":true}}}
 ```
 
-<hr>
+## License
 
-A more detailed examples can be found in the [Wiki](https://github.com/SaseQ/discord-mcp/wiki).
+MIT.
+
+## Support
+
+[![Donate to the Project](https://img.shields.io/badge/Donate_to_the_Project-Support_Development-ff69b4?style=for-the-badge&logo=heart&logoColor=white)](https://donate.stripe.com/cNidRbdkAbdP8iU7SD4ko0b)
+
+## Affiliate Links
+
+<details>
+<summary>Services I use (affiliate)</summary>
+
+Using these links helps support continued development.
+
+### Hostinger VPS
+- [KVM 1](https://www.hostinger.com/cart?product=vps%3Avps_kvm_1&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a491-d783-7057-85d2-27de6e01e2c5)
+- [KVM 2](https://www.hostinger.com/cart?product=vps%3Avps_kvm_2&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a492-26cf-7333-b6d7-692e17bf8ce1)
+- [KVM 4](https://www.hostinger.com/cart?product=vps%3Avps_kvm_4&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a492-531e-70d3-83f5-e28eb919466d)
+- [KVM 8](https://www.hostinger.com/cart?product=vps%3Avps_kvm_8&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a492-7ce9-70fb-b96c-2184abc56764)
+
+### Cloud Hosting
+- [Cloud Economy](https://www.hostinger.com/cart?product=hosting%3Acloud_economy&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a48f-e7fa-7358-9ff0-f9ba2e8d6e36)
+- [Cloud Professional](https://www.hostinger.com/cart?product=hosting%3Acloud_professional&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a490-20fd-70bc-959e-a1f2cd9a69a6)
+- [Cloud Enterprise](https://www.hostinger.com/cart?product=hosting%3Acloud_enterprise&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a490-5972-72e4-850f-40d618988dc1)
+
+### Web Hosting
+- [Premium](https://www.hostinger.com/cart?product=hosting%3Ahostinger_premium&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a48f-4c21-7199-9918-8f31a3f6a0d9)
+- [Business](https://www.hostinger.com/cart?product=hosting%3Ahostinger_business&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a48f-1135-72ba-acbb-13e0e7550db0)
+
+### Website Builder
+- [Premium](https://www.hostinger.com/cart?product=hosting%3Ahostinger_premium&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a492-f240-7309-b3fe-9f6909fbc769&product_type=website-builder)
+- [Business](https://www.hostinger.com/cart?product=hosting%3Ahostinger_business&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a492-7ce9-70fb-b96c-2184abc56764)
+
+### Agency Hosting
+- [Startup](https://www.hostinger.com/cart?product=hosting%3Aagency_startup&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a490-d03c-71de-9acf-08fd4fa911de)
+- [Growth](https://www.hostinger.com/cart?product=hosting%3Aagency_growth&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a491-6af4-731f-8947-f1458f07fa5b)
+- [Professional](https://www.hostinger.com/cart?product=hosting%3Aagency_professional&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a491-03fb-73f8-9910-044a0a33393a)
+
+### Email
+- [Business Pro](https://www.hostinger.com/cart?product=hostinger_mail%3Apro&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a493-5c27-727b-b7f9-8747ffb4e5ee)
+- [Business Premium](https://www.hostinger.com/cart?product=hostinger_mail%3Apremium&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a493-a3fc-72b8-a961-94ed6e1c70e6)
+
+### Reach
+- [Reach 500](https://www.hostinger.com/cart?product=reach%3A500&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a494-3ebf-7367-b409-9948de50a297)
+- [Reach 1000](https://www.hostinger.com/cart?product=reach%3A1000&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a494-8bb9-726e-bb8d-9de9a72a3c21)
+- [Reach 2500](https://www.hostinger.com/cart?product=reach%3A2500&period=12&referral_type=cart_link&REFERRALCODE=ZUWMADPANOFE&referral_id=0199a494-c9c1-7191-b600-cafa2e9adafc)
+
+</details>
+
+## Contact
+
+Open an issue in `MADPANDA3D/DISCORD-MCP`.
+
+<p align="center">
+  <img src="https://assets.zyrosite.com/cdn-cgi/image/format=auto,w=316,fit=crop,q=95/dJo56xnDoJCnbgxg/official-logo-mxBMZGQ8Owc8p2M2.jpeg" width="160" alt="MADPANDA3D logo" />
+  <br />
+  <strong>MADPANDA3D</strong>
+</p>
