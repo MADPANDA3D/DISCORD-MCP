@@ -25,8 +25,27 @@ except Exception:  # pragma: no cover - optional runtime dependency
     try:
         from mcp.server.dependencies import get_http_headers
     except Exception:  # pragma: no cover - optional runtime dependency
+        try:
+            from mcp.server.lowlevel.server import request_ctx
+        except Exception:  # pragma: no cover - optional runtime dependency
+            request_ctx = None
+
         def get_http_headers() -> dict:
-            return {}
+            if request_ctx is None:
+                return {}
+            context = request_ctx.get(None)
+            if context is None:
+                return {}
+            request = getattr(context, "request", None)
+            if request is None:
+                return {}
+            headers = getattr(request, "headers", None)
+            if headers is None:
+                return {}
+            try:
+                return dict(headers)
+            except Exception:
+                return {}
 
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN", "").strip()
