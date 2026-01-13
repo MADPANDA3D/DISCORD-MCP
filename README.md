@@ -61,7 +61,7 @@ Screenshots below show the MCP node configuration in n8n.
 <p align="center">
   <img src="./assets/n8n/n8n-qdrant-mcp-setup-step2.jpg" alt="n8n MCP setup step 2" width="900" />
 </p>
-<p align="center"><em>Step 3 screenshot coming soon.</em></p>
+<p align="center"><em>Step 3 screenshot will be added when provided.</em></p>
 
 ## Deploy
 
