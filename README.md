@@ -27,7 +27,7 @@
 
 ## Overview
 
-This server supports both STDIO and HTTP streamable transports. The hosted endpoint uses header
+This server supports both STDIO and HTTP streamable transports.  The hosted endpoint uses header
 authentication so clients can bring their own Discord bot credentials.
 
 ## Hosted MCP (Header Auth)
