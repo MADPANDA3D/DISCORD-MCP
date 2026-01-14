@@ -2140,17 +2140,6 @@ async def send_message(
         dry_run = parse_bool(dry_run)
         resolved_channel_id = resolve_channel_id(channel_id)
 
-        confirm_error = require_confirm(
-            confirm,
-            "send_message",
-            start_time,
-            request_id,
-            warnings=warnings,
-            channel_id=resolved_channel_id,
-        )
-        if confirm_error:
-            return confirm_error
-
         if not message and not embed_title and not embed_description:
             error = build_error(
                 "invalid_payload",
