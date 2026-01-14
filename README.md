@@ -280,6 +280,7 @@ curl -i -X POST http://localhost:8085/mcp \
 | `LOG_LEVEL`                     | Log level                                                                  | `INFO`                            |
 | `LOG_REDACT_MESSAGE_CONTENT`    | Redact message content in logs/results                                     | `true`                            |
 | `MCP_ADMIN_TOOLS_ENABLED`       | Enable admin-gated edit/delete tools                                       | `false`                           |
+| `MCP_REQUIRE_CONFIRM`           | Require `confirm="CONFIRM APPLY"` for confirm-gated tools                  | `false`                           |
 | `MCP_HTTP_PORT`                 | HTTP server port                                                          | `8085`                            |
 | `MCP_BIND_ADDRESS`              | HTTP bind address                                                         | `0.0.0.0`                         |
 | `MCP_TRANSPORT`                 | Transport type                                                             | `streamable-http`                 |
@@ -293,6 +294,7 @@ curl -i -X POST http://localhost:8085/mcp \
 | `MCP_DISCORD_BLOCKED_CHANNELS_HEADER` | Header name for blocked channels                                    | `x-discord-blocked-channels`      |
 
 Note: header auth only applies to HTTP transport; STDIO cannot pass headers.
+Confirm gating is controlled by `MCP_REQUIRE_CONFIRM` (set `true` to enforce `confirm="CONFIRM APPLY"`).
 
 </details>
 

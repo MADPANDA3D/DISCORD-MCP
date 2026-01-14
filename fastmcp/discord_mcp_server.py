@@ -56,6 +56,7 @@ DISCORD_PRIMARY_CHANNEL_ID_RAW = os.getenv("DISCORD_PRIMARY_CHANNEL_ID", "").str
 DISCORD_ALLOWED_CHANNEL_IDS_RAW = os.getenv("DISCORD_ALLOWED_CHANNEL_IDS", "").strip()
 DISCORD_BLOCKED_CHANNEL_IDS_RAW = os.getenv("DISCORD_BLOCKED_CHANNEL_IDS", "").strip()
 MCP_ALLOW_REQUEST_OVERRIDES_RAW = os.getenv("MCP_ALLOW_REQUEST_OVERRIDES", "").strip()
+MCP_REQUIRE_CONFIRM_RAW = os.getenv("MCP_REQUIRE_CONFIRM", "").strip()
 MCP_REQUIRE_REQUEST_DISCORD_TOKEN_RAW = os.getenv(
     "MCP_REQUIRE_REQUEST_DISCORD_TOKEN", ""
 ).strip()
@@ -194,6 +195,9 @@ def parse_int(value, default=None):
 
 
 CONFIRM_APPLY_VALUE = "CONFIRM APPLY"
+CONFIRM_REQUIRED = (
+    parse_bool(MCP_REQUIRE_CONFIRM_RAW) if MCP_REQUIRE_CONFIRM_RAW else True
+)
 ALLOW_REQUEST_OVERRIDES = parse_bool(MCP_ALLOW_REQUEST_OVERRIDES_RAW)
 REQUIRE_REQUEST_DISCORD_TOKEN = (
     parse_bool(MCP_REQUIRE_REQUEST_DISCORD_TOKEN_RAW)
@@ -1301,6 +1305,8 @@ def require_confirm(
     diagnostics: dict | None = None,
     extra: dict | None = None,
 ) -> dict | None:
+    if not CONFIRM_REQUIRED:
+        return None
     if confirm != CONFIRM_APPLY_VALUE:
         error = build_error(
             "permission_denied",
@@ -1961,6 +1967,7 @@ async def discord_health_check(guild_id: str = "") -> dict:
         "protected_role_ids_count": len(PROTECTED_ROLE_IDS),
         "allowed_target_role_ids_count": len(ALLOWED_TARGET_ROLE_IDS),
         "allow_request_overrides": ALLOW_REQUEST_OVERRIDES,
+        "confirm_required": CONFIRM_REQUIRED,
         "require_request_discord_token": REQUIRE_REQUEST_DISCORD_TOKEN,
         "require_request_guild_id": REQUIRE_REQUEST_GUILD_ID,
         "require_request_blocked_channels": REQUIRE_REQUEST_BLOCKED_CHANNELS,
