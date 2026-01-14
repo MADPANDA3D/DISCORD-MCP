@@ -723,6 +723,76 @@ LINK_RE = re.compile(r"https?://\\S+", re.IGNORECASE)
 MAX_AUDIT_ITEMS = 10
 
 
+def serialize_embeds(embeds: list[discord.Embed] | None) -> list[dict]:
+    if not embeds:
+        return []
+    payload = []
+    for embed in embeds:
+        fields = []
+        for field in embed.fields or []:
+            fields.append(
+                {
+                    "name": field.name if getattr(field, "name", None) else None,
+                    "value": field.value if getattr(field, "value", None) else None,
+                    "inline": bool(getattr(field, "inline", False)),
+                }
+            )
+        payload.append(
+            {
+                "title": embed.title,
+                "description": embed.description,
+                "url": embed.url,
+                "color": getattr(embed.color, "value", None)
+                if getattr(embed, "color", None) is not None
+                else None,
+                "fields": fields,
+                "footer": getattr(embed.footer, "text", None)
+                if getattr(embed, "footer", None) is not None
+                else None,
+                "author": getattr(embed.author, "name", None)
+                if getattr(embed, "author", None) is not None
+                else None,
+            }
+        )
+    return payload
+
+
+def extract_embed_text(embeds: list[discord.Embed] | None) -> str:
+    if not embeds:
+        return ""
+    parts = []
+    for embed in embeds:
+        if embed.title:
+            parts.append(embed.title)
+        if embed.description:
+            parts.append(embed.description)
+        if getattr(embed, "author", None) is not None and getattr(embed.author, "name", None):
+            parts.append(embed.author.name)
+        for field in embed.fields or []:
+            if getattr(field, "name", None):
+                parts.append(field.name)
+            if getattr(field, "value", None):
+                parts.append(field.value)
+        if getattr(embed, "footer", None) is not None and getattr(embed.footer, "text", None):
+            parts.append(embed.footer.text)
+        if embed.url:
+            parts.append(embed.url)
+    return "\n".join(part for part in parts if part)
+
+
+def merge_message_text(content: str | None, embed_text: str) -> str:
+    content_value = content or ""
+    embed_value = embed_text or ""
+    if content_value and embed_value:
+        return f"{content_value}\n\n{embed_value}"
+    return content_value or embed_value
+
+
+def get_message_text(message) -> str:
+    embeds = getattr(message, "embeds", None)
+    return merge_message_text(getattr(message, "content", None), extract_embed_text(embeds))
+
+
 def resolve_timezone(name: str | None) -> ZoneInfo:
     if not name:
         return AUDIT_TIMEZONE
@@ -773,7 +843,7 @@ async def fetch_messages_in_range(channel, start_utc: datetime, end_utc: datetim
 
 
 def build_audit_item(msg) -> dict:
-    content = msg.content or ""
+    content = get_message_text(msg)
     snippet = content.strip()
     if len(snippet) > 200:
         snippet = snippet[:200] + "..."
@@ -811,13 +881,14 @@ def summarize_daily_audit(messages: list) -> dict:
     buckets = {"highlights": [], "blockers": [], "decisions": [], "questions": []}
 
     for msg in messages:
+        text = get_message_text(msg)
         author_counter[msg.author.id] += 1
         author_names.setdefault(msg.author.id, msg.author.name)
         if msg.attachments:
             attachments_count += len(msg.attachments)
-        links = LINK_RE.findall(msg.content or "")
+        links = LINK_RE.findall(text)
         link_counter.update(links)
-        bucket = classify_audit_message(msg.content or "")
+        bucket = classify_audit_message(text)
         if bucket and len(buckets[bucket]) < MAX_AUDIT_ITEMS:
             buckets[bucket].append(build_audit_item(msg))
 
@@ -3128,10 +3199,14 @@ async def read_messages(
                 },
                 "created_at": msg.created_at.isoformat(),
                 "content": msg.content,
+                "embed_text": extract_embed_text(msg.embeds),
+                "content_with_embeds": get_message_text(msg),
+                "embeds": serialize_embeds(msg.embeds),
                 "jump_url": msg.jump_url,
                 "attachments_count": len(msg.attachments),
                 "has_attachments": bool(msg.attachments),
-                "has_links": bool(re.findall(r"https?://\\S+", msg.content or "")),
+                "has_links": bool(LINK_RE.search(get_message_text(msg))),
+                "has_embeds": bool(msg.embeds),
             }
             for msg in messages
         ]
@@ -3327,7 +3402,7 @@ async def search_messages(
                 return False
             if before_dt and msg.created_at > before_dt:
                 return False
-            content = msg.content or ""
+            content = get_message_text(msg)
             if query and query.lower() not in content.lower():
                 return False
             if has_link and not LINK_RE.search(content):
@@ -3343,13 +3418,17 @@ async def search_messages(
                 "author": {"id": str(msg.author.id), "name": msg.author.name},
                 "created_at": msg.created_at.isoformat(),
                 "content": msg.content,
+                "embed_text": extract_embed_text(msg.embeds),
+                "content_with_embeds": get_message_text(msg),
+                "embeds": serialize_embeds(msg.embeds),
                 "jump_url": msg.jump_url,
                 "channel_id": str(msg.channel.id),
                 "thread_id": str(msg.channel.id)
                 if isinstance(msg.channel, discord.Thread)
                 else None,
-                "has_links": bool(LINK_RE.search(msg.content or "")),
+                "has_links": bool(LINK_RE.search(get_message_text(msg))),
                 "attachments_count": len(msg.attachments),
+                "has_embeds": bool(msg.embeds),
             }
             for msg in filtered
         ]
@@ -5628,7 +5707,11 @@ async def read_private_messages(user_id: str, count: str = "") -> dict:
                 },
                 "created_at": msg.created_at.isoformat(),
                 "content": msg.content,
+                "embed_text": extract_embed_text(msg.embeds),
+                "content_with_embeds": get_message_text(msg),
+                "embeds": serialize_embeds(msg.embeds),
                 "jump_url": msg.jump_url,
+                "has_embeds": bool(msg.embeds),
             }
             for msg in messages
         ]
