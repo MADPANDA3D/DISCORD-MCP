@@ -45,6 +45,7 @@ n8n setup:
 3. Set **Server transport** to **HTTP streamable**.
 4. Set **Auth** to **Multiple Headers Auth**.
 5. Add headers:
+   - `X-OpenAI-Api` (optional; required for image OCR)
    - `X-Discord-Bot-Token`
    - `X-Discord-Guild-Id`
    - `X-Discord-Blocked-Channels` (required; can be empty)
@@ -319,6 +320,7 @@ MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS=true
 ```
 
 Client headers:
+- `X-OpenAI-Api`: OpenAI API key (optional; required for `analyze_attachment`)
 - `X-Discord-Bot-Token`: Discord bot token (required, not a user token)
 - `X-Discord-Guild-Id`: guild id (required)
 - `X-Discord-Blocked-Channels`: blocked channel names (required, may be empty)
