@@ -1,4 +1,5 @@
 import asyncio
+import json
 import hashlib
 import logging
 import os
@@ -57,6 +58,16 @@ DISCORD_ALLOWED_CHANNEL_IDS_RAW = os.getenv("DISCORD_ALLOWED_CHANNEL_IDS", "").s
 DISCORD_BLOCKED_CHANNEL_IDS_RAW = os.getenv("DISCORD_BLOCKED_CHANNEL_IDS", "").strip()
 MCP_ALLOW_REQUEST_OVERRIDES_RAW = os.getenv("MCP_ALLOW_REQUEST_OVERRIDES", "").strip()
 MCP_REQUIRE_CONFIRM_RAW = os.getenv("MCP_REQUIRE_CONFIRM", "").strip()
+OPENAI_VISION_ENABLED_RAW = os.getenv("OPENAI_VISION_ENABLED", "").strip()
+OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
+OPENAI_VISION_API_URL = (
+    os.getenv("OPENAI_VISION_API_URL", "https://api.openai.com/v1/chat/completions")
+    .strip()
+    or "https://api.openai.com/v1/chat/completions"
+)
+OPENAI_VISION_MAX_MB_RAW = os.getenv("OPENAI_VISION_MAX_MB", "10").strip()
+OPENAI_VISION_TIMEOUT_SECONDS_RAW = os.getenv("OPENAI_VISION_TIMEOUT_SECONDS", "30").strip()
+MCP_OPENAI_API_HEADER = os.getenv("MCP_OPENAI_API_HEADER", "x-openai-api").strip() or "x-openai-api"
 MCP_REQUIRE_REQUEST_DISCORD_TOKEN_RAW = os.getenv(
     "MCP_REQUIRE_REQUEST_DISCORD_TOKEN", ""
 ).strip()
@@ -199,6 +210,7 @@ CONFIRM_REQUIRED = (
     parse_bool(MCP_REQUIRE_CONFIRM_RAW) if MCP_REQUIRE_CONFIRM_RAW else True
 )
 ALLOW_REQUEST_OVERRIDES = parse_bool(MCP_ALLOW_REQUEST_OVERRIDES_RAW)
+OPENAI_VISION_ENABLED = parse_bool(OPENAI_VISION_ENABLED_RAW)
 REQUIRE_REQUEST_DISCORD_TOKEN = (
     parse_bool(MCP_REQUIRE_REQUEST_DISCORD_TOKEN_RAW)
     if MCP_REQUIRE_REQUEST_DISCORD_TOKEN_RAW
@@ -217,12 +229,19 @@ REQUIRE_REQUEST_BLOCKED_CHANNELS = (
 REQUEST_DISCORD_TOKEN_HEADER = MCP_DISCORD_TOKEN_HEADER.lower()
 REQUEST_DISCORD_GUILD_ID_HEADER = MCP_DISCORD_GUILD_ID_HEADER.lower()
 REQUEST_DISCORD_BLOCKED_CHANNELS_HEADER = MCP_DISCORD_BLOCKED_CHANNELS_HEADER.lower()
+REQUEST_OPENAI_API_HEADER = MCP_OPENAI_API_HEADER.lower()
 DISCORD_ALLOW_ALL_READ = parse_bool(DISCORD_ALLOW_ALL_READ_RAW)
 DISCORD_DM_ENABLED = parse_bool(DISCORD_DM_ENABLED_RAW)
 LOG_REDACT_MESSAGE_CONTENT = parse_bool(LOG_REDACT_MESSAGE_CONTENT_RAW)
 BOT_POOL_TTL_SECONDS = parse_int(MCP_BOT_POOL_TTL_SECONDS_RAW, 900)
 if BOT_POOL_TTL_SECONDS is None or BOT_POOL_TTL_SECONDS <= 0:
     BOT_POOL_TTL_SECONDS = 900
+OPENAI_VISION_MAX_MB = parse_int(OPENAI_VISION_MAX_MB_RAW, 10)
+if OPENAI_VISION_MAX_MB is None or OPENAI_VISION_MAX_MB <= 0:
+    OPENAI_VISION_MAX_MB = 10
+OPENAI_VISION_TIMEOUT_SECONDS = parse_int(OPENAI_VISION_TIMEOUT_SECONDS_RAW, 30)
+if OPENAI_VISION_TIMEOUT_SECONDS is None or OPENAI_VISION_TIMEOUT_SECONDS <= 0:
+    OPENAI_VISION_TIMEOUT_SECONDS = 30
 
 if not DISCORD_TOKEN and not ALLOW_REQUEST_OVERRIDES:
     raise RuntimeError("DISCORD_TOKEN is not set")
@@ -795,6 +814,32 @@ def merge_message_text(content: str | None, embed_text: str) -> str:
 def get_message_text(message) -> str:
     embeds = getattr(message, "embeds", None)
     return merge_message_text(getattr(message, "content", None), extract_embed_text(embeds))
+
+
+def get_openai_api_key(headers: dict | None = None) -> str | None:
+    normalized = normalize_headers(headers or get_http_headers())
+    value = normalized.get(REQUEST_OPENAI_API_HEADER, "").strip()
+    return value or None
+
+
+def is_image_attachment(attachment) -> bool:
+    content_type = (getattr(attachment, "content_type", None) or "").lower()
+    if content_type.startswith("image/"):
+        return True
+    filename = (getattr(attachment, "filename", None) or "").lower()
+    return filename.endswith((".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff"))
+
+
+def attachment_metadata(attachment) -> dict:
+    return {
+        "filename": getattr(attachment, "filename", None),
+        "content_type": getattr(attachment, "content_type", None),
+        "size_bytes": getattr(attachment, "size", None),
+        "url": getattr(attachment, "url", None),
+        "proxy_url": getattr(attachment, "proxy_url", None),
+        "width": getattr(attachment, "width", None),
+        "height": getattr(attachment, "height", None),
+    }
 
 
 def resolve_timezone(name: str | None) -> ZoneInfo:
@@ -1968,6 +2013,12 @@ async def discord_health_check(guild_id: str = "") -> dict:
         "allowed_target_role_ids_count": len(ALLOWED_TARGET_ROLE_IDS),
         "allow_request_overrides": ALLOW_REQUEST_OVERRIDES,
         "confirm_required": CONFIRM_REQUIRED,
+        "openai_vision_enabled": OPENAI_VISION_ENABLED,
+        "openai_vision_model": OPENAI_VISION_MODEL,
+        "openai_vision_api_url": OPENAI_VISION_API_URL,
+        "openai_vision_max_mb": OPENAI_VISION_MAX_MB,
+        "openai_vision_timeout_seconds": OPENAI_VISION_TIMEOUT_SECONDS,
+        "openai_api_header": MCP_OPENAI_API_HEADER,
         "require_request_discord_token": REQUIRE_REQUEST_DISCORD_TOKEN,
         "require_request_guild_id": REQUIRE_REQUEST_GUILD_ID,
         "require_request_blocked_channels": REQUIRE_REQUEST_BLOCKED_CHANNELS,
@@ -1975,6 +2026,7 @@ async def discord_health_check(guild_id: str = "") -> dict:
             "discord_token": REQUEST_DISCORD_TOKEN_HEADER,
             "guild_id": REQUEST_DISCORD_GUILD_ID_HEADER,
             "blocked_channels": REQUEST_DISCORD_BLOCKED_CHANNELS_HEADER,
+            "openai_api_key": REQUEST_OPENAI_API_HEADER,
         },
         "bot_pool_ttl_seconds": BOT_POOL_TTL_SECONDS,
         "max_embed_chars": 4096,
@@ -3477,6 +3529,273 @@ async def search_messages(
         error = exception_to_error(exc)
         return error_with_log(
             "search_messages",
+            start_time,
+            request_id,
+            error,
+            warnings=warnings,
+            channel_id=resolved_channel_id,
+        )
+
+
+@mcp.tool()
+async def analyze_attachment(
+    channel_id: str = "",
+    message_id: str = "",
+    attachment_index: str = "0",
+    mode: str = "ocr",
+    prompt: str = "",
+) -> dict:
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    warnings = []
+    resolved_channel_id = None
+    try:
+        if not OPENAI_VISION_ENABLED:
+            error = build_error(
+                "permission_denied",
+                "OpenAI vision is disabled; set OPENAI_VISION_ENABLED=true.",
+                required_perms=["OPENAI_VISION_ENABLED=true"],
+            )
+            return error_with_log("analyze_attachment", start_time, request_id, error)
+
+        header_name = MCP_OPENAI_API_HEADER
+        api_key = get_openai_api_key()
+        if not api_key:
+            error = build_error(
+                "permission_denied",
+                f"OpenAI API key missing; provide {header_name} header.",
+                required_perms=[header_name],
+                diagnostics={"required_headers": [header_name]},
+            )
+            return error_with_log("analyze_attachment", start_time, request_id, error)
+
+        resolved_channel_id = resolve_channel_id(channel_id)
+        channel = await get_message_target(resolved_channel_id)
+        read_channel_id = (
+            channel.parent_id
+            if isinstance(channel, discord.Thread) and channel.parent_id
+            else channel.id
+        )
+        allow_error = require_read_allowed(
+            read_channel_id,
+            "analyze_attachment",
+            start_time,
+            request_id,
+            warnings=warnings,
+        )
+        if allow_error:
+            return allow_error
+
+        parsed_message_id = parse_snowflake(message_id)
+        if parsed_message_id is None:
+            error = build_error(
+                "invalid_payload", "message_id must be a Discord snowflake."
+            )
+            return error_with_log(
+                "analyze_attachment",
+                start_time,
+                request_id,
+                error,
+                warnings=warnings,
+                channel_id=resolved_channel_id,
+            )
+
+        msg = await retry_read(
+            "fetch_message", lambda: channel.fetch_message(int(parsed_message_id))
+        )
+        if msg is None:
+            error = build_error("not_found", "Message not found by message_id.")
+            return error_with_log(
+                "analyze_attachment",
+                start_time,
+                request_id,
+                error,
+                warnings=warnings,
+                channel_id=resolved_channel_id,
+            )
+
+        attachments = list(msg.attachments or [])
+        if not attachments:
+            error = build_error("invalid_payload", "Message has no attachments.")
+            return error_with_log(
+                "analyze_attachment",
+                start_time,
+                request_id,
+                error,
+                warnings=warnings,
+                channel_id=resolved_channel_id,
+            )
+
+        index_value = parse_int(attachment_index, 0)
+        if index_value is None or index_value < 0 or index_value >= len(attachments):
+            error = build_error(
+                "invalid_payload",
+                "attachment_index is out of range.",
+                diagnostics={"attachments_count": len(attachments)},
+            )
+            return error_with_log(
+                "analyze_attachment",
+                start_time,
+                request_id,
+                error,
+                warnings=warnings,
+                channel_id=resolved_channel_id,
+            )
+
+        attachment = attachments[index_value]
+        size_bytes = getattr(attachment, "size", None)
+        if size_bytes and size_bytes > OPENAI_VISION_MAX_MB * 1024 * 1024:
+            error = build_error(
+                "invalid_payload",
+                f"Attachment exceeds {OPENAI_VISION_MAX_MB} MB limit.",
+                diagnostics={"size_bytes": size_bytes},
+            )
+            return error_with_log(
+                "analyze_attachment",
+                start_time,
+                request_id,
+                error,
+                warnings=warnings,
+                channel_id=resolved_channel_id,
+            )
+
+        if not is_image_attachment(attachment):
+            error = build_error("invalid_payload", "Attachment is not an image.")
+            return error_with_log(
+                "analyze_attachment",
+                start_time,
+                request_id,
+                error,
+                warnings=warnings,
+                channel_id=resolved_channel_id,
+            )
+
+        mode_value = (mode or "ocr").strip().lower()
+        if mode_value not in ("ocr", "describe"):
+            error = build_error("invalid_payload", "mode must be 'ocr' or 'describe'.")
+            return error_with_log(
+                "analyze_attachment",
+                start_time,
+                request_id,
+                error,
+                warnings=warnings,
+                channel_id=resolved_channel_id,
+            )
+
+        prompt_text = (prompt or "").strip()
+        if not prompt_text:
+            if mode_value == "describe":
+                prompt_text = "Describe the image clearly and mention any visible text."
+            else:
+                prompt_text = (
+                    "Extract all readable text from this image. Preserve line breaks."
+                )
+
+        request_payload = {
+            "model": OPENAI_VISION_MODEL,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": attachment.url},
+                        },
+                    ],
+                }
+            ],
+            "max_tokens": 800,
+        }
+
+        timeout = aiohttp.ClientTimeout(total=OPENAI_VISION_TIMEOUT_SECONDS)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.post(
+                OPENAI_VISION_API_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=request_payload,
+            ) as response:
+                response_text = await response.text()
+                if response.status >= 400:
+                    error = build_error(
+                        "invalid_payload",
+                        "OpenAI API error.",
+                        diagnostics={
+                            "status": response.status,
+                            "response": response_text[:500],
+                        },
+                    )
+                    return error_with_log(
+                        "analyze_attachment",
+                        start_time,
+                        request_id,
+                        error,
+                        warnings=warnings,
+                        channel_id=resolved_channel_id,
+                    )
+                try:
+                    response_json = json.loads(response_text)
+                except json.JSONDecodeError:
+                    error = build_error(
+                        "invalid_payload",
+                        "Invalid OpenAI response payload.",
+                        diagnostics={"response": response_text[:500]},
+                    )
+                    return error_with_log(
+                        "analyze_attachment",
+                        start_time,
+                        request_id,
+                        error,
+                        warnings=warnings,
+                        channel_id=resolved_channel_id,
+                    )
+
+        result_text = ""
+        usage = None
+        if isinstance(response_json, dict):
+            usage = response_json.get("usage")
+            choices = response_json.get("choices") or []
+            if choices:
+                message = choices[0].get("message") if isinstance(choices[0], dict) else None
+                if message and isinstance(message, dict):
+                    result_text = message.get("content") or ""
+            if not result_text and response_json.get("output_text"):
+                result_text = response_json.get("output_text") or ""
+
+        if not result_text:
+            warnings.append("No text extracted from OpenAI response.")
+
+        log_action(
+            "analyze_attachment",
+            start_time,
+            "ok",
+            guild_id=channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID,
+            channel_id=resolved_channel_id,
+        )
+        meta = build_meta(
+            start_time,
+            request_id=request_id,
+            warnings=warnings,
+            guild_id=channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID,
+            channel_id=resolved_channel_id,
+        )
+        data = {
+            "mode": mode_value,
+            "text": result_text,
+            "model": OPENAI_VISION_MODEL,
+            "attachment": attachment_metadata(attachment),
+            "message_id": str(msg.id),
+            "channel_id": str(channel.id),
+            "usage": usage,
+        }
+        return success_response(data, meta)
+    except Exception as exc:
+        error = exception_to_error(exc)
+        return error_with_log(
+            "analyze_attachment",
             start_time,
             request_id,
             error,

@@ -201,6 +201,7 @@ curl -i -X POST http://localhost:8085/mcp \
 - `delete_message`: delete messages (admin + confirm)
 - `read_messages`: read recent history
 - `search_messages`: search with filters
+- `analyze_attachment`: OCR or describe image attachments (OpenAI vision)
 - `add_reaction`: add a reaction
 - `remove_reaction`: remove a reaction
 
@@ -286,6 +287,12 @@ curl -i -X POST http://localhost:8085/mcp \
 | `MCP_TRANSPORT`                 | Transport type                                                             | `streamable-http`                 |
 | `MCP_STDIO`                     | Enable STDIO transport                                                     | `false`                           |
 | `MCP_ALLOW_REQUEST_OVERRIDES`   | Enable per-request headers for public endpoints                            | `false`                           |
+| `OPENAI_VISION_ENABLED`         | Enable OpenAI vision (attachment OCR/describe)                             | `false`                           |
+| `OPENAI_VISION_MODEL`           | OpenAI model for vision                                                    | `gpt-4o-mini`                     |
+| `OPENAI_VISION_API_URL`         | OpenAI API URL for vision                                                  | `https://api.openai.com/v1/chat/completions` |
+| `OPENAI_VISION_MAX_MB`          | Max attachment size for vision (MB)                                        | `10`                              |
+| `OPENAI_VISION_TIMEOUT_SECONDS` | OpenAI request timeout (seconds)                                           | `30`                              |
+| `MCP_OPENAI_API_HEADER`         | Header name for OpenAI API key                                             | `x-openai-api`                    |
 | `MCP_REQUIRE_REQUEST_DISCORD_TOKEN` | Require bot token header (if overrides enabled)                        | `false`                           |
 | `MCP_REQUIRE_REQUEST_GUILD_ID`  | Require guild id header (if overrides enabled)                             | `false`                           |
 | `MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS` | Require blocked channels header (if overrides enabled)              | `false`                           |
@@ -322,6 +329,18 @@ name does not match, the request still succeeds and a warning is returned.
 If required headers are missing, the server returns a JSON-RPC error with
 `type=permission_denied` and `diagnostics.required_headers` listing the
 missing header names.
+
+Optional OpenAI vision (for `analyze_attachment`):
+
+Server env:
+
+```bash
+OPENAI_VISION_ENABLED=true
+MCP_OPENAI_API_HEADER=x-openai-api
+```
+
+Client header:
+- `X-OpenAI-Api`: OpenAI API key (required for vision; omitted headers return permission_denied)
 
 ## Examples (FastMCP JSON-RPC)
 
