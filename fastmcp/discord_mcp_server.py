@@ -346,7 +346,7 @@ async def wait_until_ready_safe(
         if client.is_ready():
             return
         ready_event = getattr(client, "_ready", None)
-        if ready_event is not None:
+        if ready_event is not None and hasattr(ready_event, "wait"):
             try:
                 await asyncio.wait_for(ready_event.wait(), timeout=poll_interval)
                 return
@@ -2052,17 +2052,6 @@ async def discord_ack(
         if include_timestamp:
             ack_message = f"{ack_message} ({datetime.now(timezone.utc).isoformat()})"
 
-        confirm_error = require_confirm(
-            confirm,
-            "discord_ack",
-            start_time,
-            request_id,
-            warnings=warnings,
-            channel_id=resolved_channel_id,
-        )
-        if confirm_error:
-            return confirm_error
-
         target = await get_message_target(resolved_channel_id)
         allowed = is_message_target_allowed(target)
         diagnostics = {
@@ -2169,17 +2158,31 @@ async def send_message(
         if allow_error:
             return allow_error
 
-        channel = await get_text_channel(resolved_channel_id)
-        member = await get_bot_member(channel.guild)
-        perms = (
-            channel.permissions_for(member)
-            if member is not None
-            else discord.Permissions.none()
-        )
-        caps = channel_capabilities(perms)
-        diagnostics["permissions"] = caps
+        thread_if_split = parse_bool(thread_if_split)
+        thread_name = (thread_name or "").strip()
+        has_embed = bool(embed_title or embed_description or embed_color)
+        channel = None
+        perms = None
+        caps = None
+        try:
+            channel = await get_text_channel(resolved_channel_id)
+            member = await get_bot_member(channel.guild)
+            perms = (
+                channel.permissions_for(member)
+                if member is not None
+                else discord.Permissions.none()
+            )
+            caps = channel_capabilities(perms)
+            diagnostics["permissions"] = caps
+        except Exception as exc:
+            if dry_run:
+                warnings.append(f"Dry-run skipped channel lookup: {exc}")
+                diagnostics["channel_lookup_error"] = str(exc)
+                caps = {"create_threads": False}
+            else:
+                raise
 
-        if not perms.send_messages:
+        if perms is not None and not perms.send_messages:
             error = build_error(
                 "permission_denied",
                 "Missing permission to send messages.",
@@ -2192,14 +2195,9 @@ async def send_message(
                 request_id,
                 error,
                 warnings=warnings,
-                guild_id=channel.guild.id,
+                guild_id=channel.guild.id if channel else None,
                 channel_id=resolved_channel_id,
             )
-
-        thread_if_split = parse_bool(thread_if_split)
-        thread_name = (thread_name or "").strip()
-
-        has_embed = bool(embed_title or embed_description or embed_color)
         embed_title_length = len(embed_title) if embed_title else 0
         embed_description_length = len(embed_description) if embed_description else 0
         content_length = len(message) if message else 0
@@ -2215,7 +2213,7 @@ async def send_message(
                 "embed_title_limit": 256,
                 "embed_description_length": embed_description_length,
                 "embed_description_limit": 4096,
-                "embeds_allowed": perms.embed_links,
+                "embeds_allowed": perms.embed_links if perms is not None else None,
                 "planned_parts": planned_parts,
                 "will_split": will_split,
                 "thread_if_split": thread_if_split,
@@ -2234,10 +2232,10 @@ async def send_message(
                 request_id,
                 error,
                 warnings=warnings,
-                guild_id=channel.guild.id,
+                guild_id=channel.guild.id if channel else get_active_guild_id(),
                 channel_id=resolved_channel_id,
             )
-        if has_embed and not perms.embed_links:
+        if has_embed and perms is not None and not perms.embed_links:
             error = build_error(
                 "permission_denied",
                 "Missing permission to embed links.",
@@ -2250,7 +2248,7 @@ async def send_message(
                 request_id,
                 error,
                 warnings=warnings,
-                guild_id=channel.guild.id,
+                guild_id=channel.guild.id if channel else get_active_guild_id(),
                 channel_id=resolved_channel_id,
             )
 
@@ -2269,7 +2267,7 @@ async def send_message(
                     request_id,
                     error,
                     warnings=warnings,
-                    guild_id=channel.guild.id,
+                    guild_id=channel.guild.id if channel else get_active_guild_id(),
                     channel_id=resolved_channel_id,
                 )
 
@@ -2298,9 +2296,10 @@ async def send_message(
                 }
             )
 
-        thread_planned = thread_if_split and will_split and caps["create_threads"]
-        if thread_if_split and will_split and not caps["create_threads"]:
-            warnings.append("create_threads permission missing; falling back to channel.")
+        can_create_threads = bool(caps and caps.get("create_threads"))
+        thread_planned = thread_if_split and will_split and can_create_threads
+        if thread_if_split and will_split and not can_create_threads:
+            warnings.append("create_threads permission missing or unavailable; falling back to channel.")
         if thread_planned and not thread_name:
             if embed_title:
                 thread_name = embed_title.strip()
@@ -2343,12 +2342,12 @@ async def send_message(
                 start_time,
                 request_id=request_id,
                 warnings=warnings,
-                guild_id=channel.guild.id,
+                guild_id=channel.guild.id if channel else get_active_guild_id(),
                 channel_id=resolved_channel_id,
             )
             data = {
                 "dry_run": True,
-                "channel_id": str(channel.id),
+                "channel_id": str(channel.id) if channel else str(resolved_channel_id),
                 "diagnostics": diagnostics,
             }
             return success_response(data, meta)
