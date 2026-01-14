@@ -342,6 +342,12 @@ MCP_OPENAI_API_HEADER=x-openai-api
 Client header:
 - `X-OpenAI-Api`: OpenAI API key (required for vision; omitted headers return permission_denied)
 
+Example OCR call (include `X-OpenAI-Api` header in the request):
+
+```json
+{"jsonrpc":"2.0","id":30,"method":"tools/call","params":{"name":"analyze_attachment","arguments":{"channel_id":"123456789012345678","message_id":"123456789012345679","attachment_index":"0","mode":"ocr"}}}
+```
+
 ## Examples (FastMCP JSON-RPC)
 
 Timeout a member:
