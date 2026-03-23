@@ -300,6 +300,10 @@ curl -i -X POST http://localhost:8085/mcp \
 | `MCP_DISCORD_TOKEN_HEADER`      | Header name for bot token                                                  | `x-discord-bot-token`             |
 | `MCP_DISCORD_GUILD_ID_HEADER`   | Header name for guild id                                                   | `x-discord-guild-id`              |
 | `MCP_DISCORD_BLOCKED_CHANNELS_HEADER` | Header name for blocked channels                                    | `x-discord-blocked-channels`      |
+| `MCP_DISCORD_ALLOW_ALL_READ_HEADER` | Header name to override `DISCORD_ALLOW_ALL_READ`                        | `x-discord-allow-all-read`        |
+| `MCP_DISCORD_DM_ENABLED_HEADER` | Header name to override `DISCORD_DM_ENABLED`                              | `x-discord-dm-enabled`            |
+| `MCP_ADMIN_TOOLS_ENABLED_HEADER` | Header name to override `MCP_ADMIN_TOOLS_ENABLED`                      | `x-mcp-admin-tools-enabled`       |
+| `MCP_REQUIRE_CONFIRM_HEADER` | Header name to override `MCP_REQUIRE_CONFIRM`                              | `x-mcp-require-confirm`           |
 
 Note: header auth only applies to HTTP transport; STDIO cannot pass headers.
 Confirm gating is controlled by `MCP_REQUIRE_CONFIRM` (set `true` to enforce `confirm="CONFIRM APPLY"`).
@@ -324,6 +328,10 @@ Client headers:
 - `X-Discord-Bot-Token`: Discord bot token (required, not a user token)
 - `X-Discord-Guild-Id`: guild id (required)
 - `X-Discord-Blocked-Channels`: blocked channel names (required, may be empty)
+- `X-Discord-Allow-All-Read`: optional override (`true`/`false`)
+- `X-Discord-Dm-Enabled`: optional override (`true`/`false`)
+- `X-Mcp-Admin-Tools-Enabled`: optional override (`true`/`false`)
+- `X-Mcp-Require-Confirm`: optional override (`true`/`false`)
 
 Blocked channel format: `#channel, #channel` (spaces optional). If a channel
 name does not match, the request still succeeds and a warning is returned.
@@ -331,6 +339,9 @@ name does not match, the request still succeeds and a warning is returned.
 If required headers are missing, the server returns a JSON-RPC error with
 `type=permission_denied` and `diagnostics.required_headers` listing the
 missing header names.
+
+OAuth discovery note: if your portal/hub injects headers directly to `/mcp`,
+OAuth discovery endpoints are optional for normal operation.
 
 Optional OpenAI vision (for `analyze_attachment`):
 

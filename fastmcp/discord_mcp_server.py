@@ -84,6 +84,18 @@ MCP_DISCORD_GUILD_ID_HEADER = os.getenv(
 MCP_DISCORD_BLOCKED_CHANNELS_HEADER = os.getenv(
     "MCP_DISCORD_BLOCKED_CHANNELS_HEADER", "x-discord-blocked-channels"
 ).strip() or "x-discord-blocked-channels"
+MCP_DISCORD_ALLOW_ALL_READ_HEADER = os.getenv(
+    "MCP_DISCORD_ALLOW_ALL_READ_HEADER", "x-discord-allow-all-read"
+).strip() or "x-discord-allow-all-read"
+MCP_DISCORD_DM_ENABLED_HEADER = os.getenv(
+    "MCP_DISCORD_DM_ENABLED_HEADER", "x-discord-dm-enabled"
+).strip() or "x-discord-dm-enabled"
+MCP_ADMIN_TOOLS_ENABLED_HEADER = os.getenv(
+    "MCP_ADMIN_TOOLS_ENABLED_HEADER", "x-mcp-admin-tools-enabled"
+).strip() or "x-mcp-admin-tools-enabled"
+MCP_REQUIRE_CONFIRM_HEADER = os.getenv(
+    "MCP_REQUIRE_CONFIRM_HEADER", "x-mcp-require-confirm"
+).strip() or "x-mcp-require-confirm"
 MCP_BOT_POOL_TTL_SECONDS_RAW = os.getenv("MCP_BOT_POOL_TTL_SECONDS", "900").strip()
 MCP_ADMIN_TOOLS_ENABLED = os.getenv("MCP_ADMIN_TOOLS_ENABLED", "").strip().lower() in (
     "1",
@@ -224,11 +236,15 @@ REQUIRE_REQUEST_GUILD_ID = (
 REQUIRE_REQUEST_BLOCKED_CHANNELS = (
     parse_bool(MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS_RAW)
     if MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS_RAW
-    else ALLOW_REQUEST_OVERRIDES
+    else False
 )
 REQUEST_DISCORD_TOKEN_HEADER = MCP_DISCORD_TOKEN_HEADER.lower()
 REQUEST_DISCORD_GUILD_ID_HEADER = MCP_DISCORD_GUILD_ID_HEADER.lower()
 REQUEST_DISCORD_BLOCKED_CHANNELS_HEADER = MCP_DISCORD_BLOCKED_CHANNELS_HEADER.lower()
+REQUEST_DISCORD_ALLOW_ALL_READ_HEADER = MCP_DISCORD_ALLOW_ALL_READ_HEADER.lower()
+REQUEST_DISCORD_DM_ENABLED_HEADER = MCP_DISCORD_DM_ENABLED_HEADER.lower()
+REQUEST_ADMIN_TOOLS_ENABLED_HEADER = MCP_ADMIN_TOOLS_ENABLED_HEADER.lower()
+REQUEST_REQUIRE_CONFIRM_HEADER = MCP_REQUIRE_CONFIRM_HEADER.lower()
 REQUEST_OPENAI_API_HEADER = MCP_OPENAI_API_HEADER.lower()
 DISCORD_ALLOW_ALL_READ = parse_bool(DISCORD_ALLOW_ALL_READ_RAW)
 DISCORD_DM_ENABLED = parse_bool(DISCORD_DM_ENABLED_RAW)
@@ -613,15 +629,38 @@ def parse_blocked_channel_names(raw: str | None) -> list[str]:
         return []
     if not isinstance(raw, str):
         raw = str(raw)
+    raw = raw.strip()
+    if not raw:
+        return []
+    if raw.lower() in {"none", "null", "nil", "[]"}:
+        return []
     parts = [part.strip() for part in raw.split(",")]
     cleaned = []
     for part in parts:
         if not part:
             continue
+        if part.lower() in {"none", "null", "nil", "[]"}:
+            continue
         name = part.lstrip("#").strip()
         if name:
             cleaned.append(name)
     return cleaned
+
+
+def parse_optional_bool_header(
+    raw: str | None, header_name: str, warnings: list[str]
+) -> bool | None:
+    if raw is None:
+        return None
+    value = str(raw).strip().lower()
+    if not value:
+        return None
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    warnings.append(f"Invalid boolean value for {header_name}; using default.")
+    return None
 
 
 class HeaderAuthError(Exception):
@@ -664,17 +703,67 @@ def get_active_blocked_channel_ids() -> set[int]:
     return set(BLOCKED_CHANNEL_IDS) | override_ids
 
 
+def get_active_allow_all_read() -> bool:
+    overrides = get_active_request_overrides()
+    if overrides and overrides.get("allow_all_read") is not None:
+        return bool(overrides["allow_all_read"])
+    return DISCORD_ALLOW_ALL_READ
+
+
+def get_active_dm_enabled() -> bool:
+    overrides = get_active_request_overrides()
+    if overrides and overrides.get("dm_enabled") is not None:
+        return bool(overrides["dm_enabled"])
+    return DISCORD_DM_ENABLED
+
+
+def get_active_admin_tools_enabled() -> bool:
+    overrides = get_active_request_overrides()
+    if overrides and overrides.get("admin_tools_enabled") is not None:
+        return bool(overrides["admin_tools_enabled"])
+    return MCP_ADMIN_TOOLS_ENABLED
+
+
+def get_active_confirm_required() -> bool:
+    overrides = get_active_request_overrides()
+    if overrides and overrides.get("confirm_required") is not None:
+        return bool(overrides["confirm_required"])
+    return CONFIRM_REQUIRED
+
+
 async def build_request_overrides() -> tuple[dict | None, list[str]]:
     if not ALLOW_REQUEST_OVERRIDES:
         return None, []
     headers = normalize_headers(get_http_headers())
+    warnings: list[str] = []
     token_present = REQUEST_DISCORD_TOKEN_HEADER in headers
     guild_present = REQUEST_DISCORD_GUILD_ID_HEADER in headers
     blocked_present = REQUEST_DISCORD_BLOCKED_CHANNELS_HEADER in headers
+    allow_all_read_present = REQUEST_DISCORD_ALLOW_ALL_READ_HEADER in headers
+    dm_enabled_present = REQUEST_DISCORD_DM_ENABLED_HEADER in headers
+    admin_tools_enabled_present = REQUEST_ADMIN_TOOLS_ENABLED_HEADER in headers
+    confirm_required_present = REQUEST_REQUIRE_CONFIRM_HEADER in headers
 
     token_value = headers.get(REQUEST_DISCORD_TOKEN_HEADER, "")
     guild_value = headers.get(REQUEST_DISCORD_GUILD_ID_HEADER, "")
     blocked_value = headers.get(REQUEST_DISCORD_BLOCKED_CHANNELS_HEADER, None)
+    allow_all_read_value = headers.get(REQUEST_DISCORD_ALLOW_ALL_READ_HEADER, None)
+    dm_enabled_value = headers.get(REQUEST_DISCORD_DM_ENABLED_HEADER, None)
+    admin_tools_enabled_value = headers.get(REQUEST_ADMIN_TOOLS_ENABLED_HEADER, None)
+    confirm_required_value = headers.get(REQUEST_REQUIRE_CONFIRM_HEADER, None)
+
+    allow_all_read_override = parse_optional_bool_header(
+        allow_all_read_value, REQUEST_DISCORD_ALLOW_ALL_READ_HEADER, warnings
+    )
+    dm_enabled_override = parse_optional_bool_header(
+        dm_enabled_value, REQUEST_DISCORD_DM_ENABLED_HEADER, warnings
+    )
+    admin_tools_enabled_override = parse_optional_bool_header(
+        admin_tools_enabled_value, REQUEST_ADMIN_TOOLS_ENABLED_HEADER, warnings
+    )
+    confirm_required_override = parse_optional_bool_header(
+        confirm_required_value, REQUEST_REQUIRE_CONFIRM_HEADER, warnings
+    )
 
     missing_required = []
     if REQUIRE_REQUEST_DISCORD_TOKEN and (not token_present or not token_value):
@@ -689,7 +778,15 @@ async def build_request_overrides() -> tuple[dict | None, list[str]]:
             missing_required,
         )
 
-    if not token_present and not guild_present and not blocked_present:
+    if (
+        not token_present
+        and not guild_present
+        and not blocked_present
+        and not allow_all_read_present
+        and not dm_enabled_present
+        and not admin_tools_enabled_present
+        and not confirm_required_present
+    ):
         return None, []
 
     guild_id = None
@@ -704,8 +801,11 @@ async def build_request_overrides() -> tuple[dict | None, list[str]]:
         "guild_id": guild_id,
         "blocked_channel_names": blocked_names,
         "blocked_channel_ids": set(),
+        "allow_all_read": allow_all_read_override,
+        "dm_enabled": dm_enabled_override,
+        "admin_tools_enabled": admin_tools_enabled_override,
+        "confirm_required": confirm_required_override,
     }
-    warnings: list[str] = []
     if blocked_names:
         if guild_id is None:
             warnings.append("Blocked channels provided without a guild id; ignoring.")
@@ -1012,7 +1112,7 @@ def effective_allowed_channel_ids(
     ids = []
     if PRIMARY_CHANNEL_ID is not None:
         ids.append(PRIMARY_CHANNEL_ID)
-    allow_all = ALLOW_ALL_CHANNELS if for_write else (DISCORD_ALLOW_ALL_READ or ALLOW_ALL_CHANNELS)
+    allow_all = ALLOW_ALL_CHANNELS if for_write else (get_active_allow_all_read() or ALLOW_ALL_CHANNELS)
     if allow_all:
         if guild is not None:
             sample_count = 0
@@ -1059,7 +1159,7 @@ def is_write_allowed(channel_id: int) -> bool:
 def is_read_allowed(channel_id: int) -> bool:
     if channel_id in get_active_blocked_channel_ids():
         return False
-    if DISCORD_ALLOW_ALL_READ:
+    if get_active_allow_all_read():
         return True
     return is_write_allowed(channel_id)
 
@@ -1075,7 +1175,7 @@ def filter_channels_for_read(channels: list) -> list:
         for channel in channels
         if getattr(channel, "id", None) not in blocked_ids
     ]
-    if DISCORD_ALLOW_ALL_READ or ALLOW_ALL_CHANNELS:
+    if get_active_allow_all_read() or ALLOW_ALL_CHANNELS:
         return channels
     allowed_ids = set(ALLOWED_CHANNEL_IDS)
     if PRIMARY_CHANNEL_ID is not None:
@@ -1350,7 +1450,7 @@ def require_confirm(
     diagnostics: dict | None = None,
     extra: dict | None = None,
 ) -> dict | None:
-    if not CONFIRM_REQUIRED:
+    if not get_active_confirm_required():
         return None
     if confirm != CONFIRM_APPLY_VALUE:
         error = build_error(
@@ -1466,7 +1566,7 @@ def require_dm_enabled(
     request_id: str | None,
     warnings: list[str] | None = None,
 ) -> dict | None:
-    if DISCORD_DM_ENABLED:
+    if get_active_dm_enabled():
         return None
     error = build_error(
         "permission_denied",
@@ -2003,16 +2103,16 @@ async def discord_health_check(guild_id: str = "") -> dict:
         "blocked_channel_ids": [
             str(cid) for cid in sorted(get_active_blocked_channel_ids())
         ],
-        "allow_all_read": DISCORD_ALLOW_ALL_READ,
-        "admin_tools_enabled": MCP_ADMIN_TOOLS_ENABLED,
-        "dm_enabled": DISCORD_DM_ENABLED,
+        "allow_all_read": get_active_allow_all_read(),
+        "admin_tools_enabled": get_active_admin_tools_enabled(),
+        "dm_enabled": get_active_dm_enabled(),
         "log_redact_message_content": LOG_REDACT_MESSAGE_CONTENT,
         "audit_timezone": DISCORD_AUDIT_TIMEZONE_NAME,
         "protected_user_ids_count": len(PROTECTED_USER_IDS),
         "protected_role_ids_count": len(PROTECTED_ROLE_IDS),
         "allowed_target_role_ids_count": len(ALLOWED_TARGET_ROLE_IDS),
         "allow_request_overrides": ALLOW_REQUEST_OVERRIDES,
-        "confirm_required": CONFIRM_REQUIRED,
+        "confirm_required": get_active_confirm_required(),
         "openai_vision_enabled": OPENAI_VISION_ENABLED,
         "openai_vision_model": OPENAI_VISION_MODEL,
         "openai_vision_api_url": OPENAI_VISION_API_URL,
@@ -2026,6 +2126,10 @@ async def discord_health_check(guild_id: str = "") -> dict:
             "discord_token": REQUEST_DISCORD_TOKEN_HEADER,
             "guild_id": REQUEST_DISCORD_GUILD_ID_HEADER,
             "blocked_channels": REQUEST_DISCORD_BLOCKED_CHANNELS_HEADER,
+            "allow_all_read": REQUEST_DISCORD_ALLOW_ALL_READ_HEADER,
+            "dm_enabled": REQUEST_DISCORD_DM_ENABLED_HEADER,
+            "admin_tools_enabled": REQUEST_ADMIN_TOOLS_ENABLED_HEADER,
+            "confirm_required": REQUEST_REQUIRE_CONFIRM_HEADER,
             "openai_api_key": REQUEST_OPENAI_API_HEADER,
         },
         "bot_pool_ttl_seconds": BOT_POOL_TTL_SECONDS,
@@ -2046,7 +2150,7 @@ async def discord_health_check(guild_id: str = "") -> dict:
         )
     if not ALLOW_ALL_CHANNELS and not ALLOWED_CHANNEL_IDS:
         warnings.append("DISCORD_ALLOWED_CHANNEL_IDS is configured but empty; writes restricted.")
-    if not DISCORD_ALLOW_ALL_READ and not ALLOWED_CHANNEL_IDS and not ALLOW_ALL_CHANNELS:
+    if not get_active_allow_all_read() and not ALLOWED_CHANNEL_IDS and not ALLOW_ALL_CHANNELS:
         warnings.append(
             "DISCORD_ALLOW_ALL_READ is false and no allowlist is configured; reads are restricted."
         )
@@ -2684,7 +2788,7 @@ async def discord_smoke_test(
     report["message_id"] = message_id
 
     should_delete = False
-    if include_admin and MCP_ADMIN_TOOLS_ENABLED and message_id:
+    if include_admin and get_active_admin_tools_enabled() and message_id:
         edit = await edit_message(
             channel_id=report["channel_id"] or channel_id,
             message_id=message_id,
@@ -2864,7 +2968,7 @@ async def edit_message(
     diagnostics = {}
     try:
         dry_run = parse_bool(dry_run)
-        if not MCP_ADMIN_TOOLS_ENABLED:
+        if not get_active_admin_tools_enabled():
             error = build_error(
                 "permission_denied",
                 "MCP_ADMIN_TOOLS_ENABLED must be true to edit messages.",
@@ -3034,7 +3138,7 @@ async def delete_message(
     diagnostics = {}
     try:
         dry_run = parse_bool(dry_run)
-        if not MCP_ADMIN_TOOLS_ENABLED:
+        if not get_active_admin_tools_enabled():
             error = build_error(
                 "permission_denied",
                 "MCP_ADMIN_TOOLS_ENABLED must be true to delete messages.",
@@ -6227,7 +6331,7 @@ async def find_channel(channel_name: str, guild_id: str = "") -> dict:
             error = build_error("invalid_payload", "channelName cannot be null.")
             return error_with_log("find_channel", start_time, request_id, error)
         if (
-            not DISCORD_ALLOW_ALL_READ
+            not get_active_allow_all_read()
             and not ALLOWED_CHANNEL_IDS
             and PRIMARY_CHANNEL_ID is None
             and not ALLOW_ALL_CHANNELS
@@ -6302,7 +6406,7 @@ async def list_channels(guild_id: str = "") -> dict:
     warnings = []
     try:
         if (
-            not DISCORD_ALLOW_ALL_READ
+            not get_active_allow_all_read()
             and not ALLOWED_CHANNEL_IDS
             and PRIMARY_CHANNEL_ID is None
             and not ALLOW_ALL_CHANNELS
@@ -6480,7 +6584,7 @@ async def find_category(category_name: str, guild_id: str = "") -> dict:
             error = build_error("invalid_payload", "categoryName cannot be null.")
             return error_with_log("find_category", start_time, request_id, error)
         if (
-            not DISCORD_ALLOW_ALL_READ
+            not get_active_allow_all_read()
             and not ALLOWED_CHANNEL_IDS
             and PRIMARY_CHANNEL_ID is None
             and not ALLOW_ALL_CHANNELS
@@ -6496,7 +6600,7 @@ async def find_category(category_name: str, guild_id: str = "") -> dict:
         categories = [
             c for c in guild.categories if c.name.lower() == category_name.lower()
         ]
-        if not DISCORD_ALLOW_ALL_READ and not ALLOW_ALL_CHANNELS:
+        if not get_active_allow_all_read() and not ALLOW_ALL_CHANNELS:
             allowed_ids = set(ALLOWED_CHANNEL_IDS)
             if PRIMARY_CHANNEL_ID is not None:
                 allowed_ids.add(PRIMARY_CHANNEL_ID)
@@ -6552,7 +6656,7 @@ async def list_channels_in_category(category_id: str, guild_id: str = "") -> dic
                 "list_channels_in_category", start_time, request_id, error
             )
         if (
-            not DISCORD_ALLOW_ALL_READ
+            not get_active_allow_all_read()
             and not ALLOWED_CHANNEL_IDS
             and PRIMARY_CHANNEL_ID is None
             and not ALLOW_ALL_CHANNELS

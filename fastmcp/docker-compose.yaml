@@ -31,14 +31,15 @@ services:
       MCP_DISCORD_TOKEN_HEADER: "${MCP_DISCORD_TOKEN_HEADER:-x-discord-bot-token}"
       MCP_DISCORD_GUILD_ID_HEADER: "${MCP_DISCORD_GUILD_ID_HEADER:-x-discord-guild-id}"
       MCP_DISCORD_BLOCKED_CHANNELS_HEADER: "${MCP_DISCORD_BLOCKED_CHANNELS_HEADER:-x-discord-blocked-channels}"
+      MCP_DISCORD_ALLOW_ALL_READ_HEADER: "${MCP_DISCORD_ALLOW_ALL_READ_HEADER:-x-discord-allow-all-read}"
+      MCP_DISCORD_DM_ENABLED_HEADER: "${MCP_DISCORD_DM_ENABLED_HEADER:-x-discord-dm-enabled}"
+      MCP_ADMIN_TOOLS_ENABLED_HEADER: "${MCP_ADMIN_TOOLS_ENABLED_HEADER:-x-mcp-admin-tools-enabled}"
+      MCP_REQUIRE_CONFIRM_HEADER: "${MCP_REQUIRE_CONFIRM_HEADER:-x-mcp-require-confirm}"
       MCP_BOT_POOL_TTL_SECONDS: "${MCP_BOT_POOL_TTL_SECONDS:-900}"
       DISCORD_CHANNEL_CACHE_TTL_SECONDS: "${DISCORD_CHANNEL_CACHE_TTL_SECONDS:-600}"
       DISCORD_JOB_TTL_SECONDS: "${DISCORD_JOB_TTL_SECONDS:-3600}"
     networks:
-      - npm_default
-    ports:
-      - "8085:8085"
-
+      - mcp-network
 networks:
-  npm_default:
+  mcp-network:
     external: true
