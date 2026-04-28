@@ -198,6 +198,25 @@ LAST_RATE_LIMIT = {}
 LAST_RATE_LIMIT_AT = None
 
 
+def registered_tool_count() -> int:
+    manager = getattr(mcp, "_tool_manager", None)
+    for attr in ("_tools", "tools"):
+        tools = getattr(manager, attr, None)
+        if isinstance(tools, dict):
+            return len(tools)
+        if isinstance(tools, (list, tuple, set)):
+            return len(tools)
+    list_tools = getattr(manager, "list_tools", None)
+    if callable(list_tools):
+        try:
+            tools = list_tools()
+            if isinstance(tools, (list, tuple, set)):
+                return len(tools)
+        except Exception:
+            pass
+    return 47
+
+
 def parse_bool(value) -> bool:
     if isinstance(value, bool):
         return value
@@ -6980,7 +6999,18 @@ if __name__ == "__main__":
         async def host_override(scope, receive, send):
             if scope["type"] == "http":
                 if scope.get("path") == "/health":
-                    body = b'{"status":"ok"}'
+                    tool_count = registered_tool_count()
+                    body = json.dumps(
+                        {
+                            "ok": True,
+                            "status": "ok",
+                            "service": "discord-mcp",
+                            "version": os.getenv("MCP_SERVER_VERSION", "dev"),
+                            "tool_count": tool_count,
+                            "tools": {"total": tool_count},
+                        },
+                        separators=(",", ":"),
+                    ).encode("utf-8")
                     headers = [
                         (b"content-type", b"application/json"),
                         (b"content-length", str(len(body)).encode("ascii")),
