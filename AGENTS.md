@@ -41,3 +41,4 @@
 - Use Perplexity for open research and Context7 for library/framework documentation.
 - After applying fixes, always rebuild and restart the Docker container (e.g., `docker compose -f fastmcp/docker-compose.yaml up -d --build`).
 - Always use Conventional Commits for local changes; semantic-release relies on commitlint passing.
+- Tech Support Agent ticket history lives in the MCP meta root at `/home/services/discord-mcp/tickets`; do not recreate ticket history under this child implementation repo.
