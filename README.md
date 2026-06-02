@@ -197,7 +197,7 @@ curl -i -X POST http://localhost:8085/mcp \
 <details>
 <summary>Message Management</summary>
 
-- `send_message`: send messages (supports `dry_run`, embeds, auto-splitting)
+- `send_message`: send messages (supports `dry_run`, embeds, one attachment, auto-splitting)
 - `edit_message`: edit messages (admin + confirm)
 - `delete_message`: delete messages (admin + confirm)
 - `read_messages`: read recent history
@@ -207,6 +207,12 @@ curl -i -X POST http://localhost:8085/mcp \
 - `remove_reaction`: remove a reaction
 
 </details>
+
+### `send_message` Attachments
+
+`send_message` accepts one optional attachment through `file_base64`, `file_url`, `file_path`, or a `file`/`attachment` object with `base64`, `url`, or `path`.
+
+Local `file_path` reads are disabled unless `MCP_ATTACHMENT_ALLOWED_DIRS` is set to a comma-separated allowlist of directories available inside the FastMCP container. Use `file_base64` or `file_url` for hosted clients that cannot mount local files into the service.
 
 <details>
 <summary>Thread Management</summary>

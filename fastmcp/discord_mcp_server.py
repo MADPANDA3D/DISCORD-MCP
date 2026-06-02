@@ -1,9 +1,15 @@
 import asyncio
+import base64
+import binascii
+import ipaddress
+import io
 import json
 import hashlib
 import logging
+import mimetypes
 import os
 import re
+import socket
 import time
 import uuid
 from collections import Counter
@@ -11,6 +17,8 @@ from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import wraps
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import aiohttp
@@ -67,6 +75,11 @@ OPENAI_VISION_API_URL = (
 )
 OPENAI_VISION_MAX_MB_RAW = os.getenv("OPENAI_VISION_MAX_MB", "10").strip()
 OPENAI_VISION_TIMEOUT_SECONDS_RAW = os.getenv("OPENAI_VISION_TIMEOUT_SECONDS", "30").strip()
+DISCORD_ATTACHMENT_MAX_MB_RAW = os.getenv("DISCORD_ATTACHMENT_MAX_MB", "25").strip()
+DISCORD_ATTACHMENT_URL_TIMEOUT_SECONDS_RAW = os.getenv(
+    "DISCORD_ATTACHMENT_URL_TIMEOUT_SECONDS", "20"
+).strip()
+MCP_ATTACHMENT_ALLOWED_DIRS_RAW = os.getenv("MCP_ATTACHMENT_ALLOWED_DIRS", "").strip()
 MCP_OPENAI_API_HEADER = os.getenv("MCP_OPENAI_API_HEADER", "x-openai-api").strip() or "x-openai-api"
 MCP_REQUIRE_REQUEST_DISCORD_TOKEN_RAW = os.getenv(
     "MCP_REQUIRE_REQUEST_DISCORD_TOKEN", ""
@@ -139,6 +152,20 @@ class BotState:
     task: asyncio.Task | None
     lock: asyncio.Lock
     last_used: float
+
+
+@dataclass
+class AttachmentRequest:
+    source: str
+    value: str
+    filename: str
+    content_type: str | None = None
+
+
+@dataclass
+class PreparedAttachment:
+    file: discord.File | None
+    metadata: dict
 
 
 REQUEST_OVERRIDE_CONTEXT: ContextVar[dict | None] = ContextVar(
@@ -277,6 +304,23 @@ if OPENAI_VISION_MAX_MB is None or OPENAI_VISION_MAX_MB <= 0:
 OPENAI_VISION_TIMEOUT_SECONDS = parse_int(OPENAI_VISION_TIMEOUT_SECONDS_RAW, 30)
 if OPENAI_VISION_TIMEOUT_SECONDS is None or OPENAI_VISION_TIMEOUT_SECONDS <= 0:
     OPENAI_VISION_TIMEOUT_SECONDS = 30
+DISCORD_ATTACHMENT_MAX_MB = parse_int(DISCORD_ATTACHMENT_MAX_MB_RAW, 25)
+if DISCORD_ATTACHMENT_MAX_MB is None or DISCORD_ATTACHMENT_MAX_MB <= 0:
+    DISCORD_ATTACHMENT_MAX_MB = 25
+DISCORD_ATTACHMENT_MAX_BYTES = DISCORD_ATTACHMENT_MAX_MB * 1024 * 1024
+DISCORD_ATTACHMENT_URL_TIMEOUT_SECONDS = parse_int(
+    DISCORD_ATTACHMENT_URL_TIMEOUT_SECONDS_RAW, 20
+)
+if (
+    DISCORD_ATTACHMENT_URL_TIMEOUT_SECONDS is None
+    or DISCORD_ATTACHMENT_URL_TIMEOUT_SECONDS <= 0
+):
+    DISCORD_ATTACHMENT_URL_TIMEOUT_SECONDS = 20
+MCP_ATTACHMENT_ALLOWED_DIRS = tuple(
+    Path(path.strip()).expanduser().resolve()
+    for path in MCP_ATTACHMENT_ALLOWED_DIRS_RAW.split(",")
+    if path.strip()
+)
 
 if not DISCORD_TOKEN and not ALLOW_REQUEST_OVERRIDES:
     raise RuntimeError("DISCORD_TOKEN is not set")
@@ -959,6 +1003,244 @@ def attachment_metadata(attachment) -> dict:
         "width": getattr(attachment, "width", None),
         "height": getattr(attachment, "height", None),
     }
+
+
+def normalize_attachment_filename(value: str | None, fallback: str) -> str:
+    candidate = (value or "").strip() or fallback
+    candidate = candidate.replace("\\", "/").split("/")[-1].strip()
+    if not candidate:
+        candidate = fallback
+    return candidate[:240]
+
+
+def filename_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    name = unquote(Path(parsed.path).name or "")
+    return normalize_attachment_filename(name, "attachment")
+
+
+def decode_attachment_object(raw, field_name: str) -> dict:
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str):
+        value = raw.strip()
+        if not value:
+            return {}
+        if value.startswith("{"):
+            try:
+                parsed = json.loads(value)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{field_name} must be valid JSON when provided as an object string.") from exc
+            if not isinstance(parsed, dict):
+                raise ValueError(f"{field_name} JSON must be an object.")
+            return parsed
+        if value.lower().startswith(("http://", "https://")):
+            return {"url": value}
+        return {"path": value}
+    raise ValueError(f"{field_name} must be an object, JSON object string, URL, or path string.")
+
+
+def build_attachment_request(
+    file,
+    attachment,
+    file_path: str,
+    file_url: str,
+    file_base64: str,
+    file_name: str,
+    file_content_type: str,
+) -> AttachmentRequest | None:
+    merged = {}
+    for field_name, raw in (("file", file), ("attachment", attachment)):
+        decoded = decode_attachment_object(raw, field_name)
+        for key, value in decoded.items():
+            if value not in (None, ""):
+                merged[key] = value
+
+    if file_path:
+        merged["path"] = file_path
+    if file_url:
+        merged["url"] = file_url
+    if file_base64:
+        merged["base64"] = file_base64
+    if file_name:
+        merged["filename"] = file_name
+    if file_content_type:
+        merged["content_type"] = file_content_type
+
+    source_values = {
+        "path": merged.get("path") or merged.get("file_path") or merged.get("local_path"),
+        "url": merged.get("url") or merged.get("file_url"),
+        "base64": merged.get("base64") or merged.get("data") or merged.get("content_base64"),
+    }
+    active_sources = [(source, str(value).strip()) for source, value in source_values.items() if str(value or "").strip()]
+    if not active_sources:
+        return None
+    if len(active_sources) > 1:
+        raise ValueError("Provide only one attachment source: file_path, file_url, or file_base64.")
+
+    source, value = active_sources[0]
+    filename = merged.get("filename") or merged.get("name") or merged.get("file_name")
+    if source == "path":
+        fallback = Path(value).name or "attachment"
+    elif source == "url":
+        fallback = filename_from_url(value)
+    else:
+        fallback = "attachment"
+    filename = normalize_attachment_filename(str(filename) if filename else "", fallback)
+    content_type = merged.get("content_type") or mimetypes.guess_type(filename)[0]
+    return AttachmentRequest(
+        source=source,
+        value=value,
+        filename=filename,
+        content_type=str(content_type) if content_type else None,
+    )
+
+
+def check_attachment_size(size_bytes: int) -> None:
+    if size_bytes <= 0:
+        raise ValueError("Attachment cannot be empty.")
+    if size_bytes > DISCORD_ATTACHMENT_MAX_BYTES:
+        raise ValueError(
+            f"Attachment exceeds DISCORD_ATTACHMENT_MAX_MB ({DISCORD_ATTACHMENT_MAX_MB} MB)."
+        )
+
+
+def is_private_attachment_host(host: str) -> bool:
+    host = (host or "").strip().strip("[]").lower()
+    if not host or host == "localhost" or host.endswith(".local"):
+        return True
+    try:
+        addresses = [ipaddress.ip_address(host)]
+    except ValueError:
+        try:
+            infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+        except socket.gaierror as exc:
+            raise ValueError("file_url host could not be resolved.") from exc
+        addresses = []
+        for info in infos:
+            sockaddr = info[4]
+            if not sockaddr:
+                continue
+            try:
+                addresses.append(ipaddress.ip_address(sockaddr[0]))
+            except ValueError:
+                continue
+    return any(
+        address.is_private
+        or address.is_loopback
+        or address.is_link_local
+        or address.is_multicast
+        or address.is_reserved
+        for address in addresses
+    )
+
+
+def resolve_local_attachment_path(path_value: str) -> Path:
+    if not MCP_ATTACHMENT_ALLOWED_DIRS:
+        raise ValueError(
+            "Local file attachments are disabled; use file_base64/file_url or configure MCP_ATTACHMENT_ALLOWED_DIRS."
+        )
+    path = Path(path_value).expanduser().resolve()
+    if not any(path == allowed or allowed in path.parents for allowed in MCP_ATTACHMENT_ALLOWED_DIRS):
+        raise ValueError("file_path is outside MCP_ATTACHMENT_ALLOWED_DIRS.")
+    if not path.is_file():
+        raise ValueError("file_path does not exist or is not a file.")
+    return path
+
+
+def decode_base64_attachment(value: str) -> bytes:
+    encoded = value.strip()
+    if "," in encoded and encoded.lower().startswith("data:"):
+        encoded = encoded.split(",", 1)[1]
+    try:
+        data = base64.b64decode(encoded, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ValueError("file_base64 must be valid base64.") from exc
+    check_attachment_size(len(data))
+    return data
+
+
+async def fetch_url_attachment(request: AttachmentRequest) -> bytes:
+    parsed = urlparse(request.value)
+    if parsed.scheme not in ("http", "https"):
+        raise ValueError("file_url must use http or https.")
+    if is_private_attachment_host(parsed.hostname or ""):
+        raise ValueError("file_url host must not resolve to a private or local address.")
+    timeout = aiohttp.ClientTimeout(total=DISCORD_ATTACHMENT_URL_TIMEOUT_SECONDS)
+    async with aiohttp.ClientSession(timeout=timeout) as session:
+        async with session.get(request.value) as response:
+            if response.status >= 400:
+                raise ValueError(f"file_url returned HTTP {response.status}.")
+            data = bytearray()
+            async for chunk in response.content.iter_chunked(65536):
+                data.extend(chunk)
+                if len(data) > DISCORD_ATTACHMENT_MAX_BYTES:
+                    raise ValueError(
+                        f"Attachment exceeds DISCORD_ATTACHMENT_MAX_MB ({DISCORD_ATTACHMENT_MAX_MB} MB)."
+                    )
+    check_attachment_size(len(data))
+    return bytes(data)
+
+
+async def prepare_discord_attachment(
+    request: AttachmentRequest | None,
+    dry_run: bool,
+) -> PreparedAttachment | None:
+    if request is None:
+        return None
+    if request.source == "base64":
+        data = decode_base64_attachment(request.value)
+        metadata = {
+            "filename": request.filename,
+            "source": "base64",
+            "size_bytes": len(data),
+        }
+        if dry_run:
+            return PreparedAttachment(file=None, metadata=metadata)
+        return PreparedAttachment(
+            file=discord.File(io.BytesIO(data), filename=request.filename),
+            metadata=metadata,
+        )
+    if request.source == "url":
+        data = await fetch_url_attachment(request)
+        metadata = {
+            "filename": request.filename,
+            "source": "url",
+            "size_bytes": len(data),
+        }
+        if dry_run:
+            return PreparedAttachment(file=None, metadata=metadata)
+        return PreparedAttachment(
+            file=discord.File(io.BytesIO(data), filename=request.filename),
+            metadata=metadata,
+        )
+    if request.source == "path":
+        path = resolve_local_attachment_path(request.value)
+        size_bytes = path.stat().st_size
+        check_attachment_size(size_bytes)
+        metadata = {
+            "filename": request.filename,
+            "source": "path",
+            "size_bytes": size_bytes,
+        }
+        if dry_run:
+            return PreparedAttachment(file=None, metadata=metadata)
+        return PreparedAttachment(
+            file=discord.File(path.open("rb"), filename=request.filename),
+            metadata=metadata,
+        )
+    raise ValueError("Unsupported attachment source.")
+
+
+def close_prepared_attachment(prepared: PreparedAttachment | None) -> None:
+    if prepared is None or prepared.file is None:
+        return
+    try:
+        prepared.file.close()
+    except Exception:
+        pass
 
 
 def resolve_timezone(name: str | None) -> ZoneInfo:
@@ -2368,11 +2650,19 @@ async def send_message(
     embed_title: str = "",
     embed_description: str = "",
     embed_color: str = "",
+    file: dict | str | None = None,
+    attachment: dict | str | None = None,
+    file_path: str = "",
+    file_url: str = "",
+    file_base64: str = "",
+    file_name: str = "",
+    file_content_type: str = "",
     dry_run: bool | str = False,
     thread_if_split: bool | str = False,
     thread_name: str = "",
     confirm: str = "",
 ) -> dict:
+    """Send a Discord message with optional embed content and one optional attachment."""
     start_time = time.perf_counter()
     request_id = str(uuid.uuid4())
     resolved_channel_id = None
@@ -2381,11 +2671,21 @@ async def send_message(
     try:
         dry_run = parse_bool(dry_run)
         resolved_channel_id = resolve_channel_id(channel_id)
+        attachment_request = build_attachment_request(
+            file,
+            attachment,
+            file_path,
+            file_url,
+            file_base64,
+            file_name,
+            file_content_type,
+        )
+        has_attachment = attachment_request is not None
 
-        if not message and not embed_title and not embed_description:
+        if not message and not embed_title and not embed_description and not has_attachment:
             error = build_error(
                 "invalid_payload",
-                "message or embed content must be provided.",
+                "message, embed content, or attachment must be provided.",
             )
             return error_with_log(
                 "send_message",
@@ -2399,6 +2699,7 @@ async def send_message(
         diagnostics = {
             "resolved_channel_id": str(resolved_channel_id),
             "allowed_channel": is_write_allowed(resolved_channel_id),
+            "attachments_count": 1 if has_attachment else 0,
         }
         allow_error = require_write_allowed(
             resolved_channel_id,
@@ -2440,6 +2741,22 @@ async def send_message(
                 "permission_denied",
                 "Missing permission to send messages.",
                 required_perms=["send_messages"],
+                diagnostics=diagnostics,
+            )
+            return error_with_log(
+                "send_message",
+                start_time,
+                request_id,
+                error,
+                warnings=warnings,
+                guild_id=channel.guild.id if channel else None,
+                channel_id=resolved_channel_id,
+            )
+        if has_attachment and perms is not None and not perms.attach_files:
+            error = build_error(
+                "permission_denied",
+                "Missing permission to attach files.",
+                required_perms=["attach_files"],
                 diagnostics=diagnostics,
             )
             return error_with_log(
@@ -2524,6 +2841,10 @@ async def send_message(
                     channel_id=resolved_channel_id,
                 )
 
+        prepared_attachment = await prepare_discord_attachment(attachment_request, dry_run)
+        if prepared_attachment is not None:
+            diagnostics["attachment"] = prepared_attachment.metadata
+
         parts = []
         for idx in range(planned_parts):
             content_part = content_parts[idx] if idx < len(content_parts) else ""
@@ -2601,6 +2922,9 @@ async def send_message(
             data = {
                 "dry_run": True,
                 "channel_id": str(channel.id) if channel else str(resolved_channel_id),
+                "attachments": [prepared_attachment.metadata]
+                if prepared_attachment is not None
+                else [],
                 "diagnostics": diagnostics,
             }
             return success_response(data, meta)
@@ -2609,39 +2933,45 @@ async def send_message(
         sent_message = None
         thread_id = None
         target_channel = channel
-        for idx, part in enumerate(parts):
-            embed = None
-            if part["include_embed"]:
-                embed = discord.Embed(
-                    title=part["embed_title"] or None,
-                    description=part["embed_description"] or None,
-                )
-                if color_value is not None:
-                    embed.color = discord.Color(color_value)
-            if idx == 0:
-                sent_message = await channel.send(
-                    content=part["content"] or None,
-                    embed=embed,
-                )
-                sent_message_ids.append(str(sent_message.id))
-                if thread_planned and sent_message is not None:
-                    try:
-                        thread = await sent_message.create_thread(
-                            name=thread_name or "MCP continuation"
-                        )
-                        record_api_success("create_thread")
-                        thread_id = str(thread.id)
-                        target_channel = thread
-                    except Exception as exc:
-                        warnings.append(f"Thread creation failed: {exc}")
-                        thread_planned = False
-                        target_channel = channel
-            else:
-                sent = await target_channel.send(
-                    content=part["content"] or None,
-                    embed=embed,
-                )
-                sent_message_ids.append(str(sent.id))
+        try:
+            for idx, part in enumerate(parts):
+                embed = None
+                if part["include_embed"]:
+                    embed = discord.Embed(
+                        title=part["embed_title"] or None,
+                        description=part["embed_description"] or None,
+                    )
+                    if color_value is not None:
+                        embed.color = discord.Color(color_value)
+                if idx == 0:
+                    send_kwargs = {
+                        "content": part["content"] or None,
+                        "embed": embed,
+                    }
+                    if prepared_attachment is not None and prepared_attachment.file is not None:
+                        send_kwargs["file"] = prepared_attachment.file
+                    sent_message = await channel.send(**send_kwargs)
+                    sent_message_ids.append(str(sent_message.id))
+                    if thread_planned and sent_message is not None:
+                        try:
+                            thread = await sent_message.create_thread(
+                                name=thread_name or "MCP continuation"
+                            )
+                            record_api_success("create_thread")
+                            thread_id = str(thread.id)
+                            target_channel = thread
+                        except Exception as exc:
+                            warnings.append(f"Thread creation failed: {exc}")
+                            thread_planned = False
+                            target_channel = channel
+                else:
+                    sent = await target_channel.send(
+                        content=part["content"] or None,
+                        embed=embed,
+                    )
+                    sent_message_ids.append(str(sent.id))
+        finally:
+            close_prepared_attachment(prepared_attachment)
 
         record_api_success("send_message")
         log_action(
@@ -2666,6 +2996,9 @@ async def send_message(
             "thread_id": thread_id,
             "jump_url": sent_message.jump_url if sent_message else None,
             "planned_parts": planned_parts,
+            "attachments": [prepared_attachment.metadata]
+            if prepared_attachment is not None
+            else [],
             "diagnostics": diagnostics,
         }
         return success_response(data, meta)
