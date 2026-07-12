@@ -101,7 +101,7 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(
             manifest["descriptorHash"],
-            self.manifest_module.descriptor_hash(canonical_descriptors),
+            self.manifest_module.descriptor_hash(manifest["tools"]),
         )
         for descriptor, canonical in zip(
             manifest["tools"], canonical_descriptors, strict=True
@@ -110,6 +110,29 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
                 descriptor["descriptorHash"],
                 self.manifest_module.descriptor_hash(canonical),
             )
+
+    def test_aggregate_hash_matches_portal_materialized_wire_contract(self):
+        manifest = self.server.current_tool_manifest()
+        canonical_without_per_tool_hashes = [
+            {
+                key: value
+                for key, value in descriptor.items()
+                if key != "descriptorHash"
+            }
+            for descriptor in manifest["tools"]
+        ]
+
+        self.assertEqual(
+            manifest["descriptorHash"],
+            self.manifest_module.descriptor_hash(manifest["tools"]),
+        )
+        self.assertNotEqual(
+            manifest["descriptorHash"],
+            self.manifest_module.descriptor_hash(
+                canonical_without_per_tool_hashes
+            ),
+            "Portal hashes materialized descriptors including each per-tool descriptorHash.",
+        )
 
     def test_descriptor_hash_is_stable_across_builds_and_excludes_runtime_values(self):
         manager = self.server.mcp._tool_manager

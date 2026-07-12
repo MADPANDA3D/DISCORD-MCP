@@ -159,7 +159,7 @@ deterministically hashed ToolManifest exposed through
 `list_capabilities(include_descriptors=true)`. The manifest includes complete input
 and output schemas, risk annotations, confirmation rules, aliases, tier, catalog
 version, build SHA, and descriptor hashes without runtime credential values.
-The current immutable catalog version is `discord-2026.07.12.2` using shared manifest
+The current immutable catalog version is `discord-2026.07.12.3` using shared manifest
 schema `1.0.0`; every descriptor identifies itself as
 `discord.<nativeToolName>` through `canonicalName`.
 

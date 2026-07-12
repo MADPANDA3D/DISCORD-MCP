@@ -19,7 +19,7 @@ from typing import Any, Mapping
 SCHEMA_VERSION = "1.0.0"
 SERVICE_ID = "discord"
 SERVICE_ALIASES = ("discord-mcp", "discord_mcp", "discord server")
-CATALOG_VERSION = "discord-2026.07.12.2"
+CATALOG_VERSION = "discord-2026.07.12.3"
 REPOSITORY_DOCS_URL = "https://github.com/MADPANDA3D/DISCORD-MCP#tools"
 GUILD_DOCS = "https://docs.discord.com/developers/resources/guild"
 CHANNEL_DOCS = "https://docs.discord.com/developers/resources/channel"
@@ -617,7 +617,7 @@ def build_tool_manifest(
         "serviceAliases": list(SERVICE_ALIASES),
         "catalogVersion": CATALOG_VERSION,
         "buildSha": get_build_sha(build_sha),
-        "descriptorHash": descriptor_hash(canonical_descriptors),
+        "descriptorHash": descriptor_hash(tools),
         "counts": counts,
         "tools": tools,
     }
