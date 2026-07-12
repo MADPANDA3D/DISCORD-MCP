@@ -43,6 +43,7 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
         required = {
             "serviceId",
             "nativeToolName",
+            "canonicalName",
             "aliases",
             "title",
             "description",
@@ -61,6 +62,14 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
         for descriptor in manifest["tools"]:
             with self.subTest(tool=descriptor["nativeToolName"]):
                 self.assertEqual(set(descriptor), required)
+                self.assertEqual(
+                    descriptor["canonicalName"],
+                    f"discord.{descriptor['nativeToolName']}",
+                )
+                self.assertEqual(
+                    list(descriptor["deprecation"]),
+                    ["deprecated", "since", "replacement", "sunsetAt", "message"],
+                )
                 self.assertGreater(len(descriptor["description"]), 120)
                 self.assertIn(descriptor["tier"], {"agent_ready", "legacy", "hidden"})
                 self.assertTrue(descriptor["documentationUrl"].startswith("https://"))
@@ -81,6 +90,26 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
                 )
                 for parameter in descriptor["inputSchema"].get("properties", {}).values():
                     self.assertTrue(parameter.get("description"))
+
+        canonical_descriptors = [
+            {
+                key: value
+                for key, value in descriptor.items()
+                if key != "descriptorHash"
+            }
+            for descriptor in manifest["tools"]
+        ]
+        self.assertEqual(
+            manifest["descriptorHash"],
+            self.manifest_module.descriptor_hash(canonical_descriptors),
+        )
+        for descriptor, canonical in zip(
+            manifest["tools"], canonical_descriptors, strict=True
+        ):
+            self.assertEqual(
+                descriptor["descriptorHash"],
+                self.manifest_module.descriptor_hash(canonical),
+            )
 
     def test_descriptor_hash_is_stable_across_builds_and_excludes_runtime_values(self):
         manager = self.server.mcp._tool_manager

@@ -19,7 +19,7 @@ from typing import Any, Mapping
 SCHEMA_VERSION = "1.0.0"
 SERVICE_ID = "discord"
 SERVICE_ALIASES = ("discord-mcp", "discord_mcp", "discord server")
-CATALOG_VERSION = "discord-2026.07.12.1"
+CATALOG_VERSION = "discord-2026.07.12.2"
 REPOSITORY_DOCS_URL = "https://github.com/MADPANDA3D/DISCORD-MCP#tools"
 GUILD_DOCS = "https://docs.discord.com/developers/resources/guild"
 CHANNEL_DOCS = "https://docs.discord.com/developers/resources/channel"
@@ -107,8 +107,8 @@ def _d(
         deprecation={
             "deprecated": False,
             "since": None,
+            "replacement": None,
             "sunsetAt": None,
-            "replacedBy": None,
             "message": None,
         },
     )
@@ -579,6 +579,7 @@ def build_tool_manifest(
             {
                 "serviceId": SERVICE_ID,
                 "nativeToolName": name,
+                "canonicalName": f"{SERVICE_ID}.{name}",
                 "aliases": list(definition.aliases),
                 "title": definition.title,
                 "description": definition.description,
