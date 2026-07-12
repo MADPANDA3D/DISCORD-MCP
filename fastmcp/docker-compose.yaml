@@ -5,6 +5,7 @@ services:
     restart: unless-stopped
     environment:
       MCP_PUBLIC_MODE: "${MCP_PUBLIC_MODE:-true}"
+      MCP_BUILD_SHA: "${MCP_BUILD_SHA:-unknown}"
       MCP_PORTAL_GRANT_TOKEN: "${MCP_PORTAL_GRANT_TOKEN:?MCP_PORTAL_GRANT_TOKEN is required}"
       MCP_PORTAL_GRANT_HEADER: "${MCP_PORTAL_GRANT_HEADER:-X-MADPANDA-PORTAL-GRANT}"
       DISCORD_TOKEN: "${DISCORD_TOKEN}"

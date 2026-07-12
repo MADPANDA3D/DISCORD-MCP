@@ -31,6 +31,19 @@ import uvicorn
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import JSONResponse
 
+from tool_manifest import (
+    CATALOG_VERSION,
+    build_tool_manifest,
+    enrich_input_schema,
+    filter_endpoint_coverage,
+    find_manifest_tools,
+    find_tool_descriptor,
+    get_build_sha,
+    is_navigation_tool,
+    manifest_categories,
+    runtime_registration,
+)
+
 try:
     from fastmcp.server.dependencies import get_http_headers
 except Exception:  # pragma: no cover - optional runtime dependency
@@ -254,11 +267,20 @@ BOT_POOL_LOCK = asyncio.Lock()
 
 class DiscordMCP(FastMCP):
     def tool(self, *args, **kwargs):  # type: ignore[override]
-        decorator = super().tool(*args, **kwargs)
+        parent_tool = super().tool
 
         def wrap(func):
+            tool_name = func.__name__
+            registration = runtime_registration(tool_name)
+            registration.update(kwargs)
+            decorator = parent_tool(*args, **registration)
+
             @wraps(func)
             async def guarded(*func_args, **func_kwargs):
+                # Catalog navigation remains behind the outer Portal grant, but
+                # deliberately avoids provider credentials and Discord work.
+                if is_navigation_tool(tool_name):
+                    return await func(*func_args, **func_kwargs)
                 if not ALLOW_REQUEST_OVERRIDES:
                     return await func(*func_args, **func_kwargs)
                 if (
@@ -281,7 +303,13 @@ class DiscordMCP(FastMCP):
                     if warnings_token is not None:
                         REQUEST_OVERRIDE_WARNINGS.reset(warnings_token)
 
-            return decorator(guarded)
+            registered = decorator(guarded)
+            runtime_tool = getattr(self._tool_manager, "_tools", {}).get(tool_name)
+            if runtime_tool is not None:
+                runtime_tool.parameters = enrich_input_schema(
+                    tool_name, runtime_tool.parameters
+                )
+            return registered
 
         return wrap
 
@@ -7404,6 +7432,220 @@ async def send_webhook_message(
         )
 
 
+def current_tool_manifest() -> dict[str, Any]:
+    """Build the complete catalog only after every native tool is registered."""
+    return build_tool_manifest(mcp._tool_manager, build_sha=get_build_sha())
+
+
+def configuration_snapshot() -> dict[str, Any]:
+    """Inspect configuration presence without contacting Discord or returning values."""
+    headers = (
+        normalize_headers(get_http_headers())
+        if PUBLIC_MODE or ALLOW_REQUEST_OVERRIDES
+        else {}
+    )
+    warnings = []
+
+    request_token_present = bool(headers.get(REQUEST_DISCORD_TOKEN_HEADER, ""))
+    request_guild_raw = headers.get(REQUEST_DISCORD_GUILD_ID_HEADER, "")
+    request_guild_valid = bool(request_guild_raw and parse_snowflake(request_guild_raw))
+    blocked_header_present = REQUEST_DISCORD_BLOCKED_CHANNELS_HEADER in headers
+
+    if request_guild_raw and not request_guild_valid:
+        warnings.append("The request-scoped Discord guild ID is not a valid snowflake.")
+
+    token_configured = request_token_present or (not PUBLIC_MODE and bool(DISCORD_TOKEN))
+    guild_configured = request_guild_valid or (
+        not PUBLIC_MODE and DEFAULT_GUILD_ID is not None
+    )
+    missing = []
+    if REQUIRE_REQUEST_DISCORD_TOKEN and not request_token_present:
+        missing.append("discord_bot_token")
+    elif not token_configured:
+        missing.append("discord_bot_token")
+    if REQUIRE_REQUEST_GUILD_ID and not request_guild_valid:
+        missing.append("discord_guild_id")
+    elif not guild_configured:
+        missing.append("discord_guild_id")
+    if REQUIRE_REQUEST_BLOCKED_CHANNELS and not blocked_header_present:
+        missing.append("blocked_channel_policy")
+    if PUBLIC_MODE and not MCP_PORTAL_GRANT_TOKEN:
+        missing.append("portal_service_grant")
+
+    return {
+        "ready": not missing,
+        "missing": missing,
+        "configuration": {
+            "publicMode": PUBLIC_MODE,
+            "portalGrantConfigured": bool(MCP_PORTAL_GRANT_TOKEN),
+            "discordBotTokenConfigured": token_configured,
+            "discordGuildConfigured": guild_configured,
+            "blockedChannelPolicyProvided": blocked_header_present,
+            "requestOverridesEnabled": ALLOW_REQUEST_OVERRIDES,
+        },
+        "capabilities": {
+            "readAllAllowedChannels": (
+                parse_bool(headers.get(REQUEST_DISCORD_ALLOW_ALL_READ_HEADER))
+                if REQUEST_DISCORD_ALLOW_ALL_READ_HEADER in headers
+                else DISCORD_ALLOW_ALL_READ
+            ),
+            "directMessagesEnabled": (
+                parse_bool(headers.get(REQUEST_DISCORD_DM_ENABLED_HEADER))
+                if REQUEST_DISCORD_DM_ENABLED_HEADER in headers
+                else DISCORD_DM_ENABLED
+            ),
+            "adminToolsEnabled": (
+                parse_bool(headers.get(REQUEST_ADMIN_TOOLS_ENABLED_HEADER))
+                if REQUEST_ADMIN_TOOLS_ENABLED_HEADER in headers
+                else MCP_ADMIN_TOOLS_ENABLED
+            ),
+            "confirmationRequired": (
+                parse_bool(headers.get(REQUEST_REQUIRE_CONFIRM_HEADER))
+                if REQUEST_REQUIRE_CONFIRM_HEADER in headers
+                else CONFIRM_REQUIRED
+            ),
+            "visionEnabled": OPENAI_VISION_ENABLED,
+        },
+        "warnings": warnings,
+    }
+
+
+@mcp.tool()
+async def check_configuration() -> dict[str, Any]:
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    data = configuration_snapshot()
+    meta = build_meta(
+        start_time,
+        request_id=request_id,
+        warnings=data.pop("warnings", []),
+    )
+    return success_response(data, meta)
+
+
+@mcp.tool()
+async def list_capabilities(include_descriptors: bool | str = False) -> dict[str, Any]:
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    manifest = current_tool_manifest()
+    include_descriptors = parse_bool(include_descriptors)
+    data = {
+        "schemaVersion": manifest["schemaVersion"],
+        "serviceId": manifest["serviceId"],
+        "serviceAliases": manifest["serviceAliases"],
+        "catalogVersion": manifest["catalogVersion"],
+        "buildSha": manifest["buildSha"],
+        "descriptorHash": manifest["descriptorHash"],
+        "counts": manifest["counts"],
+        "categories": manifest_categories(manifest),
+        "tools": manifest["tools"] if include_descriptors else [],
+        "descriptorsIncluded": include_descriptors,
+        "nextAction": (
+            None
+            if include_descriptors
+            else {
+                "toolName": "list_capabilities",
+                "arguments": {"include_descriptors": True},
+            }
+        ),
+    }
+    return success_response(
+        data,
+        build_meta(start_time, request_id=request_id),
+    )
+
+
+@mcp.tool()
+async def get_endpoint_coverage(feature: str = "") -> dict[str, Any]:
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    coverage = filter_endpoint_coverage(feature)
+    data = {
+        "serviceId": "discord",
+        "catalogVersion": CATALOG_VERSION,
+        "retrievedAt": "2026-07-12",
+        "filter": feature or None,
+        "count": len(coverage),
+        "coverage": coverage,
+    }
+    return success_response(data, build_meta(start_time, request_id=request_id))
+
+
+@mcp.tool()
+async def get_tool_usage(tool_name: str) -> dict[str, Any]:
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    manifest = current_tool_manifest()
+    descriptor = find_tool_descriptor(manifest, tool_name)
+    meta = build_meta(start_time, request_id=request_id)
+    if descriptor is None:
+        return error_response(
+            "not_found",
+            "Tool is not present in the Discord ToolManifest.",
+            meta,
+            diagnostics={"requested_type": "tool_name_or_alias"},
+        )
+    annotations = descriptor["annotations"]
+    executor = (
+        "portal.call_destructive_tool"
+        if annotations["destructiveHint"]
+        else (
+            "portal.call_read_tool"
+            if annotations["readOnlyHint"]
+            else "portal.call_write_tool"
+        )
+    )
+    return success_response(
+        {
+            "descriptor": descriptor,
+            "nextAction": {
+                "toolName": "portal.preview_tool_call",
+                "executor": executor,
+                "serviceId": "discord",
+                "nativeToolName": descriptor["nativeToolName"],
+            },
+        },
+        meta,
+    )
+
+
+@mcp.tool()
+async def find_tools(
+    query: str,
+    category: str = "",
+    risk: str = "",
+    limit: int = 8,
+    include_legacy: bool | str = False,
+) -> dict[str, Any]:
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    meta = build_meta(start_time, request_id=request_id)
+    try:
+        matches = find_manifest_tools(
+            current_tool_manifest(),
+            query,
+            category=category,
+            risk=risk,
+            limit=limit,
+            include_legacy=parse_bool(include_legacy),
+        )
+    except (TypeError, ValueError) as exc:
+        return error_response("invalid_payload", str(exc), meta)
+    return success_response(
+        {
+            "query": query,
+            "filters": {
+                "category": category or None,
+                "risk": risk or None,
+                "includeLegacy": parse_bool(include_legacy),
+            },
+            "count": len(matches),
+            "matches": matches,
+        },
+        meta,
+    )
+
+
 def build_app() -> Any:
     app_factory = mcp.streamable_http_app
     app = app_factory() if callable(app_factory) else app_factory
@@ -7422,15 +7664,38 @@ def build_app() -> Any:
     async def host_override(scope, receive, send):
         if scope["type"] == "http":
             if scope.get("path") == "/health":
-                tool_count = registered_tool_count()
+                manifest = current_tool_manifest()
+                tool_count = manifest["counts"]["raw"]
+                configuration_ready = (
+                    bool(MCP_PORTAL_GRANT_TOKEN)
+                    if PUBLIC_MODE
+                    else bool(DISCORD_TOKEN and DEFAULT_GUILD_ID is not None)
+                )
                 body = json.dumps(
                     {
                         "ok": True,
                         "status": "ok",
                         "service": "discord-mcp",
                         "version": os.getenv("MCP_SERVER_VERSION", "dev"),
+                        "build_sha": manifest["buildSha"],
+                        "catalog_version": manifest["catalogVersion"],
+                        "descriptor_hash": manifest["descriptorHash"],
                         "tool_count": tool_count,
-                        "tools": {"total": tool_count},
+                        "tools": {
+                            "total": tool_count,
+                            "raw": manifest["counts"]["raw"],
+                            "agent_ready": manifest["counts"]["agentReady"],
+                            "legacy": manifest["counts"]["legacy"],
+                            "hidden": manifest["counts"]["hidden"],
+                            "documented": manifest["counts"]["documented"],
+                        },
+                        "configuration_ready": configuration_ready,
+                        "configuration": {
+                            "provider_credentials": (
+                                "request_scoped" if PUBLIC_MODE else "server_scoped"
+                            ),
+                            "portal_grant_ready": bool(MCP_PORTAL_GRANT_TOKEN),
+                        },
                         "public_mode": PUBLIC_MODE,
                         "portal_grant_configured": bool(MCP_PORTAL_GRANT_TOKEN),
                     },

@@ -153,6 +153,27 @@ curl -i -X POST http://localhost:8085/mcp \
 
 ## Tools
 
+The FastMCP runtime publishes 52 native tools: 46 `agent_ready`, 3 `legacy`, and
+3 `hidden` from default discovery. Every tool is described by the provider-owned,
+deterministically hashed ToolManifest exposed through
+`list_capabilities(include_descriptors=true)`. The manifest includes complete input
+and output schemas, risk annotations, confirmation rules, aliases, tier, catalog
+version, build SHA, and descriptor hashes without runtime credential values.
+
+See [Discord API endpoint coverage](docs/endpoint-coverage.md) for implemented and
+intentionally excluded resource areas.
+
+<details>
+<summary>Agent navigation</summary>
+
+- `check_configuration`: report safe setup presence and policy flags without contacting Discord
+- `list_capabilities`: list counts/categories or return the lossless provider manifest
+- `get_endpoint_coverage`: inspect official Discord resource coverage and explicit gaps
+- `get_tool_usage`: return one lossless tool descriptor by native name or alias
+- `find_tools`: punctuation-normalized, multi-token ranked discovery with category/risk filters
+
+</details>
+
 <details>
 <summary>Server Information</summary>
 
@@ -296,6 +317,7 @@ Local `file_path` reads are disabled unless `MCP_ATTACHMENT_ALLOWED_DIRS` is set
 | `MCP_TRANSPORT`                 | Transport type                                                             | `streamable-http`                 |
 | `MCP_STDIO`                     | Enable STDIO transport                                                     | `false`                           |
 | `MCP_PUBLIC_MODE`               | Require the Portal grant and per-request Discord credentials on HTTP       | `false`                           |
+| `MCP_BUILD_SHA`                 | Deployed Git commit SHA reported by health and the ToolManifest             | `unknown`                         |
 | `MCP_PORTAL_GRANT_TOKEN`        | Private shared grant required from MAD MCP Portal in public mode            | unset                             |
 | `MCP_PORTAL_GRANT_HEADER`       | Header carrying the Portal service grant                                   | `X-MADPANDA-PORTAL-GRANT`         |
 | `MCP_ALLOW_REQUEST_OVERRIDES`   | Enable per-request headers; always enabled in public mode                   | `false`                           |
