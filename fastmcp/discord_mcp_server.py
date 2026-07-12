@@ -1,10 +1,11 @@
 import asyncio
 import base64
 import binascii
+import hashlib
+import hmac
 import ipaddress
 import io
 import json
-import hashlib
 import logging
 import mimetypes
 import os
@@ -18,6 +19,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from pathlib import Path
+from typing import Any
 from urllib.parse import unquote, urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -27,6 +29,7 @@ from discord.ext import commands
 from mcp.server.fastmcp import FastMCP
 import uvicorn
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.responses import JSONResponse
 
 try:
     from fastmcp.server.dependencies import get_http_headers
@@ -65,6 +68,12 @@ DISCORD_PRIMARY_CHANNEL_ID_RAW = os.getenv("DISCORD_PRIMARY_CHANNEL_ID", "").str
 DISCORD_ALLOWED_CHANNEL_IDS_RAW = os.getenv("DISCORD_ALLOWED_CHANNEL_IDS", "").strip()
 DISCORD_BLOCKED_CHANNEL_IDS_RAW = os.getenv("DISCORD_BLOCKED_CHANNEL_IDS", "").strip()
 MCP_ALLOW_REQUEST_OVERRIDES_RAW = os.getenv("MCP_ALLOW_REQUEST_OVERRIDES", "").strip()
+MCP_PUBLIC_MODE_RAW = os.getenv("MCP_PUBLIC_MODE", "false").strip()
+MCP_PORTAL_GRANT_TOKEN = os.getenv("MCP_PORTAL_GRANT_TOKEN", "").strip()
+MCP_PORTAL_GRANT_HEADER = (
+    os.getenv("MCP_PORTAL_GRANT_HEADER", "X-MADPANDA-PORTAL-GRANT").strip()
+    or "X-MADPANDA-PORTAL-GRANT"
+)
 MCP_REQUIRE_CONFIRM_RAW = os.getenv("MCP_REQUIRE_CONFIRM", "").strip()
 OPENAI_VISION_ENABLED_RAW = os.getenv("OPENAI_VISION_ENABLED", "").strip()
 OPENAI_VISION_MODEL = os.getenv("OPENAI_VISION_MODEL", "gpt-4o-mini").strip() or "gpt-4o-mini"
@@ -132,6 +141,70 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(level=LOG_LEVEL)
 logger = logging.getLogger("discord_mcp")
+
+
+def validate_portal_grant(
+    headers: dict[str, str],
+    expected_token: str,
+    header_name: str,
+) -> tuple[str | None, int]:
+    """Validate the Portal-only broker grant without exposing either value."""
+    expected = expected_token.strip()
+    if not expected:
+        return "portal_grant_not_configured", 503
+    provided = headers.get(header_name.lower(), "").strip()
+    if not provided:
+        return "missing_portal_grant", 401
+    if not hmac.compare_digest(provided, expected):
+        return "invalid_portal_grant", 401
+    return None, 200
+
+
+class PortalGrantMiddleware:
+    """Reject public MCP traffic before the protocol or provider sees it."""
+
+    def __init__(
+        self,
+        app: Any,
+        *,
+        public_mode: bool,
+        grant_token: str,
+        grant_header: str,
+    ) -> None:
+        self.app = app
+        self.public_mode = public_mode
+        self.grant_token = grant_token
+        self.grant_header = grant_header.lower()
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        path = str(scope.get("path", ""))
+        protects_mcp = path == "/mcp" or path.startswith("/mcp/")
+        if self.public_mode and scope.get("type") == "http" and protects_mcp:
+            headers = {
+                key.decode("latin-1").lower(): value.decode("latin-1")
+                for key, value in scope.get("headers", [])
+            }
+            error_code, status_code = validate_portal_grant(
+                headers,
+                self.grant_token,
+                self.grant_header,
+            )
+            if error_code is not None:
+                response = JSONResponse(
+                    {
+                        "ok": False,
+                        "error": {
+                            "type": "permission_denied",
+                            "code": error_code,
+                            "message": "MAD MCP Portal grant validation failed.",
+                        },
+                        "recovery": "Route through MAD MCP Portal with its configured service grant.",
+                    },
+                    status_code=status_code,
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def build_intents() -> discord.Intents:
@@ -267,17 +340,24 @@ CONFIRM_APPLY_VALUE = "CONFIRM APPLY"
 CONFIRM_REQUIRED = (
     parse_bool(MCP_REQUIRE_CONFIRM_RAW) if MCP_REQUIRE_CONFIRM_RAW else True
 )
-ALLOW_REQUEST_OVERRIDES = parse_bool(MCP_ALLOW_REQUEST_OVERRIDES_RAW)
+PUBLIC_MODE = parse_bool(MCP_PUBLIC_MODE_RAW)
+ALLOW_REQUEST_OVERRIDES = PUBLIC_MODE or parse_bool(MCP_ALLOW_REQUEST_OVERRIDES_RAW)
 OPENAI_VISION_ENABLED = parse_bool(OPENAI_VISION_ENABLED_RAW)
 REQUIRE_REQUEST_DISCORD_TOKEN = (
-    parse_bool(MCP_REQUIRE_REQUEST_DISCORD_TOKEN_RAW)
-    if MCP_REQUIRE_REQUEST_DISCORD_TOKEN_RAW
-    else ALLOW_REQUEST_OVERRIDES
+    PUBLIC_MODE
+    or (
+        parse_bool(MCP_REQUIRE_REQUEST_DISCORD_TOKEN_RAW)
+        if MCP_REQUIRE_REQUEST_DISCORD_TOKEN_RAW
+        else ALLOW_REQUEST_OVERRIDES
+    )
 )
 REQUIRE_REQUEST_GUILD_ID = (
-    parse_bool(MCP_REQUIRE_REQUEST_GUILD_ID_RAW)
-    if MCP_REQUIRE_REQUEST_GUILD_ID_RAW
-    else ALLOW_REQUEST_OVERRIDES
+    PUBLIC_MODE
+    or (
+        parse_bool(MCP_REQUIRE_REQUEST_GUILD_ID_RAW)
+        if MCP_REQUIRE_REQUEST_GUILD_ID_RAW
+        else ALLOW_REQUEST_OVERRIDES
+    )
 )
 REQUIRE_REQUEST_BLOCKED_CHANNELS = (
     parse_bool(MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS_RAW)
@@ -426,7 +506,7 @@ async def reset_bot_state(state: BotState, reason: str):
     await close_bot_state(state)
     state.bot = create_bot()
     state.task = None
-    logger.warning("bot_reset token=%s reason=%s", state.token, reason)
+    logger.warning("bot_reset reason=%s", reason)
 
 
 async def reset_bot(reason: str, token: str | None = None):
@@ -748,6 +828,8 @@ def get_active_request_token() -> str | None:
     overrides = get_active_request_overrides()
     if overrides and overrides.get("token"):
         return overrides["token"]
+    if PUBLIC_MODE:
+        return None
     return DISCORD_TOKEN or None
 
 
@@ -755,6 +837,8 @@ def get_active_guild_id() -> int | None:
     overrides = get_active_request_overrides()
     if overrides and overrides.get("guild_id"):
         return overrides["guild_id"]
+    if PUBLIC_MODE:
+        return None
     return DEFAULT_GUILD_ID
 
 
@@ -2140,7 +2224,7 @@ async def get_client_for_token(token: str) -> commands.Bot:
             except Exception as exc:
                 exc = exc
             if exc:
-                logger.warning("bot_task_failed token=%s err=%s", token, exc)
+                logger.warning("bot_task_failed err=%s", exc)
                 await reset_bot_state(state, "bot_task_failed")
         if state.bot is None or state.bot.is_closed() or is_http_session_closed(state.bot):
             await reset_bot_state(state, "bot_closed_or_session")
@@ -2412,6 +2496,9 @@ async def discord_health_check(guild_id: str = "") -> dict:
         "protected_user_ids_count": len(PROTECTED_USER_IDS),
         "protected_role_ids_count": len(PROTECTED_ROLE_IDS),
         "allowed_target_role_ids_count": len(ALLOWED_TARGET_ROLE_IDS),
+        "public_mode": PUBLIC_MODE,
+        "portal_grant_configured": bool(MCP_PORTAL_GRANT_TOKEN),
+        "portal_grant_header": MCP_PORTAL_GRANT_HEADER,
         "allow_request_overrides": ALLOW_REQUEST_OVERRIDES,
         "confirm_required": get_active_confirm_required(),
         "openai_vision_enabled": OPENAI_VISION_ENABLED,
@@ -7317,55 +7404,64 @@ async def send_webhook_message(
         )
 
 
+def build_app() -> Any:
+    app_factory = mcp.streamable_http_app
+    app = app_factory() if callable(app_factory) else app_factory
+    try:
+        app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
+    except Exception:
+        pass
+
+    protected_app = PortalGrantMiddleware(
+        app,
+        public_mode=PUBLIC_MODE,
+        grant_token=MCP_PORTAL_GRANT_TOKEN,
+        grant_header=MCP_PORTAL_GRANT_HEADER,
+    )
+
+    async def host_override(scope, receive, send):
+        if scope["type"] == "http":
+            if scope.get("path") == "/health":
+                tool_count = registered_tool_count()
+                body = json.dumps(
+                    {
+                        "ok": True,
+                        "status": "ok",
+                        "service": "discord-mcp",
+                        "version": os.getenv("MCP_SERVER_VERSION", "dev"),
+                        "tool_count": tool_count,
+                        "tools": {"total": tool_count},
+                        "public_mode": PUBLIC_MODE,
+                        "portal_grant_configured": bool(MCP_PORTAL_GRANT_TOKEN),
+                    },
+                    separators=(",", ":"),
+                ).encode("utf-8")
+                headers = [
+                    (b"content-type", b"application/json"),
+                    (b"content-length", str(len(body)).encode("ascii")),
+                ]
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": headers,
+                    }
+                )
+                await send({"type": "http.response.body", "body": body})
+                return
+            headers = []
+            for key, value in scope.get("headers", []):
+                if key.lower() == b"host":
+                    continue
+                headers.append((key, value))
+            headers.append((b"host", b"localhost"))
+            scope = {**scope, "headers": headers}
+        await protected_app(scope, receive, send)
+
+    return host_override
+
+
 if __name__ == "__main__":
     os.environ.setdefault("HOST", MCP_BIND_ADDRESS)
     os.environ.setdefault("PORT", str(MCP_HTTP_PORT))
-    app_factory = mcp.streamable_http_app
-
-    def build_app():
-        app = app_factory() if callable(app_factory) else app_factory
-        try:
-            app.add_middleware(TrustedHostMiddleware, allowed_hosts=["*"])
-        except Exception:
-            pass
-
-        async def host_override(scope, receive, send):
-            if scope["type"] == "http":
-                if scope.get("path") == "/health":
-                    tool_count = registered_tool_count()
-                    body = json.dumps(
-                        {
-                            "ok": True,
-                            "status": "ok",
-                            "service": "discord-mcp",
-                            "version": os.getenv("MCP_SERVER_VERSION", "dev"),
-                            "tool_count": tool_count,
-                            "tools": {"total": tool_count},
-                        },
-                        separators=(",", ":"),
-                    ).encode("utf-8")
-                    headers = [
-                        (b"content-type", b"application/json"),
-                        (b"content-length", str(len(body)).encode("ascii")),
-                    ]
-                    await send(
-                        {
-                            "type": "http.response.start",
-                            "status": 200,
-                            "headers": headers,
-                        }
-                    )
-                    await send({"type": "http.response.body", "body": body})
-                    return
-                headers = []
-                for key, value in scope.get("headers", []):
-                    if key.lower() == b"host":
-                        continue
-                    headers.append((key, value))
-                headers.append((b"host", b"localhost"))
-                scope = {**scope, "headers": headers}
-            await app(scope, receive, send)
-
-        return host_override
-
     uvicorn.run(build_app, host=MCP_BIND_ADDRESS, port=MCP_HTTP_PORT, factory=True)

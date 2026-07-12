@@ -27,29 +27,31 @@
 
 ## Overview
 
-This server supports both STDIO and HTTP streamable transports.  The hosted endpoint uses header
-authentication so clients can bring their own Discord bot credentials.
+This server supports both STDIO and HTTP streamable transports. The hosted provider endpoint is
+Portal-only: MAD MCP Portal authenticates the client, injects its private service grant, and
+forwards the client's Discord bot credentials. Self-hosted/private mode remains available for
+local and STDIO clients.
 
 ## Hosted MCP (Header Auth)
 
-Use the MADPANDA3D hosted endpoint:
+Connect clients to MAD MCP Portal:
 
 ```
-https://discord--mcp.madpanda3d.com/mcp
+https://madpanda3d.com/lab/mad-mcps/portal/api/mcp
 ```
 
-n8n setup:
+The Discord provider endpoint is not a public client endpoint. Its
+`X-MADPANDA-PORTAL-GRANT` value is an internal service credential and must never be copied into
+client configuration.
+
+n8n setup through Portal:
 
 1. Add **MCP tool node** to your agent.
-2. Add the MCP endpoint URL.
+2. Add the MAD MCP Portal endpoint URL.
 3. Set **Server transport** to **HTTP streamable**.
-4. Set **Auth** to **Multiple Headers Auth**.
-5. Add headers:
-   - `X-OpenAI-Api` (optional; required for image OCR)
-   - `X-Discord-Bot-Token`
-   - `X-Discord-Guild-Id`
-   - `X-Discord-Blocked-Channels` (required; can be empty)
-6. Save the auth credentials.
+4. Configure the Portal-issued client authentication.
+5. Store the Discord bot token and guild ID in the client's Discord service profile.
+6. Save the Portal credentials.
 7. Set **Tools to include** -> **All**.
 
 ## n8n Setup
@@ -82,9 +84,8 @@ NPM host settings:
 - HTTP/2: OFF
 - Advanced: empty
 
-Then point n8n to:
-- Endpoint: `https://discord--mcp.madpanda3d.com/mcp`
-- Transport: HTTP Streamable
+Keep the provider hostname private to MAD MCP Portal. Point n8n and other agents to the Portal
+endpoint instead; Portal supplies the service grant after client authentication.
 
 </details>
 
@@ -96,7 +97,7 @@ Then point n8n to:
 ```bash
 cd fastmcp
 cp .env.example .env
-# Edit .env with your DISCORD_TOKEN and DISCORD_GUILD_ID (or enable header overrides)
+# Hosted: set MCP_PORTAL_GRANT_TOKEN; private: set MCP_PUBLIC_MODE=false plus Discord defaults.
 docker compose -f fastmcp/docker-compose.yaml up -d --build
 ```
 
@@ -131,9 +132,10 @@ Endpoints:
 - `POST /mcp` -> JSON-RPC requests (returns JSON or SSE per request)
 
 <details>
-<summary>Example curl flow</summary>
+<summary>Example private-mode curl flow</summary>
 
 ```bash
+# Run with MCP_PUBLIC_MODE=false for direct self-hosted access.
 # 1) Initialize session
 curl -i -X POST http://localhost:8085/mcp \
   -H "Content-Type: application/json" \
@@ -293,15 +295,18 @@ Local `file_path` reads are disabled unless `MCP_ATTACHMENT_ALLOWED_DIRS` is set
 | `MCP_BIND_ADDRESS`              | HTTP bind address                                                         | `0.0.0.0`                         |
 | `MCP_TRANSPORT`                 | Transport type                                                             | `streamable-http`                 |
 | `MCP_STDIO`                     | Enable STDIO transport                                                     | `false`                           |
-| `MCP_ALLOW_REQUEST_OVERRIDES`   | Enable per-request headers for public endpoints                            | `false`                           |
+| `MCP_PUBLIC_MODE`               | Require the Portal grant and per-request Discord credentials on HTTP       | `false`                           |
+| `MCP_PORTAL_GRANT_TOKEN`        | Private shared grant required from MAD MCP Portal in public mode            | unset                             |
+| `MCP_PORTAL_GRANT_HEADER`       | Header carrying the Portal service grant                                   | `X-MADPANDA-PORTAL-GRANT`         |
+| `MCP_ALLOW_REQUEST_OVERRIDES`   | Enable per-request headers; always enabled in public mode                   | `false`                           |
 | `OPENAI_VISION_ENABLED`         | Enable OpenAI vision (attachment OCR/describe)                             | `false`                           |
 | `OPENAI_VISION_MODEL`           | OpenAI model for vision                                                    | `gpt-4o-mini`                     |
 | `OPENAI_VISION_API_URL`         | OpenAI API URL for vision                                                  | `https://api.openai.com/v1/chat/completions` |
 | `OPENAI_VISION_MAX_MB`          | Max attachment size for vision (MB)                                        | `10`                              |
 | `OPENAI_VISION_TIMEOUT_SECONDS` | OpenAI request timeout (seconds)                                           | `30`                              |
 | `MCP_OPENAI_API_HEADER`         | Header name for OpenAI API key                                             | `x-openai-api`                    |
-| `MCP_REQUIRE_REQUEST_DISCORD_TOKEN` | Require bot token header (if overrides enabled)                        | `false`                           |
-| `MCP_REQUIRE_REQUEST_GUILD_ID`  | Require guild id header (if overrides enabled)                             | `false`                           |
+| `MCP_REQUIRE_REQUEST_DISCORD_TOKEN` | Require bot token header; always required in public mode               | `false`                           |
+| `MCP_REQUIRE_REQUEST_GUILD_ID`  | Require guild id header; always required in public mode                    | `false`                           |
 | `MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS` | Require blocked channels header (if overrides enabled)              | `false`                           |
 | `MCP_DISCORD_TOKEN_HEADER`      | Header name for bot token                                                  | `x-discord-bot-token`             |
 | `MCP_DISCORD_GUILD_ID_HEADER`   | Header name for guild id                                                   | `x-discord-guild-id`              |
@@ -316,20 +321,26 @@ Confirm gating is controlled by `MCP_REQUIRE_CONFIRM` (set `true` to enforce `co
 
 </details>
 
-### Hosted MCP (Bring Your Own Discord Bot)
+### Hosted MCP (Portal-Brokered Discord Credentials)
 
-If you expose FastMCP publicly, require clients to supply their own bot token and guild ID.
+The production Compose file enables public mode. It fails closed unless the Portal service grant
+is configured, requires Discord credentials on each tool call, and never falls back to
+`DISCORD_TOKEN` or `DISCORD_GUILD_ID` from the server environment.
 
-Server env (recommended for public endpoints):
+Server env (required for public endpoints):
 
 ```bash
+MCP_PUBLIC_MODE=true
+MCP_PORTAL_GRANT_TOKEN=<private service grant>
+MCP_PORTAL_GRANT_HEADER=X-MADPANDA-PORTAL-GRANT
 MCP_ALLOW_REQUEST_OVERRIDES=true
 MCP_REQUIRE_REQUEST_DISCORD_TOKEN=true
 MCP_REQUIRE_REQUEST_GUILD_ID=true
 MCP_REQUIRE_REQUEST_BLOCKED_CHANNELS=true
 ```
 
-Client headers:
+Headers forwarded by MAD MCP Portal after it authenticates the client:
+- `X-MADPANDA-PORTAL-GRANT`: internal broker grant (never supplied by end users)
 - `X-OpenAI-Api`: OpenAI API key (optional; required for `analyze_attachment`)
 - `X-Discord-Bot-Token`: Discord bot token (required, not a user token)
 - `X-Discord-Guild-Id`: guild id (required)
@@ -346,8 +357,12 @@ If required headers are missing, the server returns a JSON-RPC error with
 `type=permission_denied` and `diagnostics.required_headers` listing the
 missing header names.
 
-OAuth discovery note: if your portal/hub injects headers directly to `/mcp`,
-OAuth discovery endpoints are optional for normal operation.
+Missing or invalid Portal grants are rejected before the MCP request body is parsed or any
+Discord provider handling occurs. The unauthenticated `/health` endpoint reports only safe
+configuration booleans; it never exposes credentials.
+
+For direct self-hosted or STDIO use, set `MCP_PUBLIC_MODE=false`. Private mode preserves the
+existing `DISCORD_TOKEN` and `DISCORD_GUILD_ID` fallback behavior.
 
 Optional OpenAI vision (for `analyze_attachment`):
 

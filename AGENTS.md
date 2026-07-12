@@ -21,8 +21,10 @@
 - No formatter/linter is configured; follow existing file layout and import grouping.
 
 ## Testing Guidelines
-- No automated tests are configured in this repo and no coverage requirements are defined.
-- If you add tests, place Java tests under `src/test/java` and Python tests under `fastmcp/tests`, then document the run command here.
+- Python regression tests live under `fastmcp/tests` and use the standard library
+  `unittest` runner: `python -m unittest discover -s fastmcp/tests -v`.
+- Place Java tests under `src/test/java` and additional Python tests under
+  `fastmcp/tests`.
 
 ## Commit & Pull Request Guidelines
 - Commit messages must follow Conventional Commits (enforced by commitlint in CI); e.g., `feat: add webhook audit`, `fix(fastmcp): handle header overrides`.
