@@ -98,8 +98,13 @@ endpoint instead; Portal supplies the service grant after client authentication.
 cd fastmcp
 cp .env.example .env
 # Hosted: set MCP_PORTAL_GRANT_TOKEN; private: set MCP_PUBLIC_MODE=false plus Discord defaults.
-docker compose -f fastmcp/docker-compose.yaml up -d --build
+MCP_BUILD_SHA="$(git rev-parse HEAD)" docker compose up -d --build
 ```
+
+The Compose runtime uses the shared `mcp-network` instead of a published host
+port. It runs as a non-root UID with a read-only root filesystem, bounded
+`/tmp`, dropped Linux capabilities, no-new-privileges, a Docker healthcheck,
+and CPU/memory/PID limits. Images and OCI labels use the deployed commit SHA.
 
 </details>
 

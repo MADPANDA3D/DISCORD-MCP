@@ -1,11 +1,26 @@
 services:
   discord-mcp:
     container_name: discord-mcp
-    build: .
+    image: fastmcp-discord-mcp:${MCP_BUILD_SHA:?MCP_BUILD_SHA must be the deployed commit SHA}
+    build:
+      context: .
+      args:
+        BUILD_SHA: ${MCP_BUILD_SHA:?MCP_BUILD_SHA must be the deployed commit SHA}
     restart: unless-stopped
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=512m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    labels:
+      org.opencontainers.image.revision: ${MCP_BUILD_SHA:?MCP_BUILD_SHA must be the deployed commit SHA}
+      org.opencontainers.image.version: ${MCP_BUILD_SHA:?MCP_BUILD_SHA must be the deployed commit SHA}
     environment:
       MCP_PUBLIC_MODE: "${MCP_PUBLIC_MODE:-true}"
-      MCP_BUILD_SHA: "${MCP_BUILD_SHA:-unknown}"
+      MCP_BUILD_SHA: "${MCP_BUILD_SHA:?MCP_BUILD_SHA must be the deployed commit SHA}"
       MCP_PORTAL_GRANT_TOKEN: "${MCP_PORTAL_GRANT_TOKEN:?MCP_PORTAL_GRANT_TOKEN is required}"
       MCP_PORTAL_GRANT_HEADER: "${MCP_PORTAL_GRANT_HEADER:-X-MADPANDA-PORTAL-GRANT}"
       DISCORD_TOKEN: "${DISCORD_TOKEN}"
@@ -45,6 +60,24 @@ services:
       MCP_BOT_POOL_TTL_SECONDS: "${MCP_BOT_POOL_TTL_SECONDS:-900}"
       DISCORD_CHANNEL_CACHE_TTL_SECONDS: "${DISCORD_CHANNEL_CACHE_TTL_SECONDS:-600}"
       DISCORD_JOB_TTL_SECONDS: "${DISCORD_JOB_TTL_SECONDS:-3600}"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8085/health', timeout=3)); assert data.get('status') == 'ok' and data.get('configuration_ready') is True and int(data.get('tool_count', 0)) > 0",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.00"
+          memory: 768m
+          pids: 256
     networks:
       - mcp-network
 networks:
