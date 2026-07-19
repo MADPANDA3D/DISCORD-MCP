@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a reproducible, non-security defect with sanitized evidence.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Never include credentials, Discord exports, private endpoints, or tenant data.
+  - type: input
+    id: version
+    attributes:
+      label: Version or image digest
+      placeholder: v1.0.0 or ghcr.io/...@sha256:<digest>
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Service mode
+      options:
+        - standalone / server credentials
+        - standalone / request BYOK
+        - portal / request BYOK
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behavior
+      description: Use synthetic identifiers and redact every secret.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal provider-free reproduction
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Public-boundary confirmation
+      options:
+        - label: I removed credentials, message content, tenant data, private endpoints, and runtime files.
+          required: true
+        - label: This is not a vulnerability report.
+          required: true

@@ -1,0 +1,428 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+env:
+  IMAGE_NAME: ghcr.io/madpanda3d/discord-mcp-server
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb
+  UV_VERSION: 0.11.29
+
+jobs:
+  verify-python:
+    name: Python ${{ matrix.python }} exact-tag verification
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12.13', '3.13.11']
+    steps:
+      - name: Check out exact tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.ref }}
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Verify exact stable tag and package version
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          RELEASE_SHA=$(git rev-parse HEAD)
+          TAG_SHA=$(git rev-list -n 1 "refs/tags/$GITHUB_REF_NAME")
+          test "$RELEASE_SHA" = "$TAG_SHA"
+          test "$RELEASE_SHA" = "$GITHUB_SHA"
+          git show-ref --verify --quiet "refs/remotes/origin/$DEFAULT_BRANCH"
+          git merge-base --is-ancestor "$RELEASE_SHA" "refs/remotes/origin/$DEFAULT_BRANCH"
+          PACKAGE_VERSION=$(python - <<'PY'
+          import tomllib
+          with open('pyproject.toml', 'rb') as handle:
+              print(tomllib.load(handle)['project']['version'])
+          PY
+          )
+          test "${GITHUB_REF_NAME#v}" = "$PACKAGE_VERSION"
+      - name: Test exact tag on Python ${{ matrix.python }}
+        run: |
+          uv sync --frozen --group dev
+          uv run python -m compileall -q src tests scripts
+          uv run python -m unittest discover -s tests -p 'test_*.py'
+          uv run ruff check src tests scripts
+          uv run ruff format --check src tests scripts
+      - name: Run single-version source and dependency gates
+        if: matrix.python == '3.12.13'
+        run: |
+          uv run python scripts/check_source_safety.py
+          uv run bandit -q -r src/madpanda_discord_mcp -lll
+          uv export --frozen --no-dev --no-emit-project \
+            --format requirements-txt --output-file requirements.lock
+          git diff --exit-code -- requirements.lock
+          uv run pip-audit --requirement requirements.lock
+
+  compose:
+    name: Validate source and immutable Compose selection
+    runs-on: ubuntu-24.04
+    needs: verify-python
+    steps:
+      - name: Check out exact tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.ref }}
+      - name: Validate source and digest-selected modes
+        env:
+          MCP_ACCESS_TOKEN: release-standalone-token-000000000000000000000000000000000000000000
+          MCP_PORTAL_GRANT_TOKEN: release-portal-grant-000000000000000000000000000000000000000000
+          MCP_BUILD_SHA: ${{ github.sha }}
+          MCP_SOURCE_FINGERPRINT: '1111111111111111111111111111111111111111111111111111111111111111'
+          MCP_IMAGE_REFERENCE: development
+        run: |
+          MCP_MODE=standalone DISCORD_CREDENTIAL_MODE=server \
+            docker compose config --format json > /tmp/discord-source.json
+          MCP_MODE=portal DISCORD_CREDENTIAL_MODE= \
+            MCP_RUNTIME_IMAGE=ghcr.io/madpanda3d/discord-mcp-server@sha256:2222222222222222222222222222222222222222222222222222222222222222 \
+            MCP_IMAGE_REFERENCE=ghcr.io/madpanda3d/discord-mcp-server@sha256:2222222222222222222222222222222222222222222222222222222222222222 \
+            docker compose config --format json > /tmp/discord-digest.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          source = json.loads(Path('/tmp/discord-source.json').read_text())
+          digest = json.loads(Path('/tmp/discord-digest.json').read_text())
+          source_service = source['services']['discord-mcp']
+          digest_service = digest['services']['discord-mcp']
+          expected = 'ghcr.io/madpanda3d/discord-mcp-server@sha256:' + ('2' * 64)
+          assert source_service['image'] == 'discord-mcp:local-source'
+          assert source_service['environment']['MCP_MODE'] == 'standalone'
+          assert source_service['environment']['DISCORD_CREDENTIAL_MODE'] == 'server'
+          assert digest_service['image'] == expected
+          assert digest_service['environment']['MCP_MODE'] == 'portal'
+          assert digest_service['environment']['DISCORD_CREDENTIAL_MODE'] == ''
+          assert digest_service['environment']['MCP_IMAGE_REFERENCE'] == expected
+          for service in (source_service, digest_service):
+              assert service['user'] == '10001:10001'
+              assert service['read_only'] is True
+              assert service['cap_drop'] == ['ALL']
+              assert service['security_opt'] == ['no-new-privileges:true']
+              assert 'MCP_BUILD_SHA' not in service['environment']
+              assert 'MCP_SOURCE_FINGERPRINT' not in service['environment']
+          PY
+
+  publish:
+    name: Verify and publish exact tag
+    runs-on: ubuntu-24.04
+    needs: [verify-python, compose]
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    steps:
+      - name: Check out exact tag
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.ref }}
+      - name: Read current repository visibility
+        id: repository
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VISIBILITY=$(gh api "repos/$GITHUB_REPOSITORY" --jq .visibility)
+          case "$VISIBILITY" in
+            public|private|internal) ;;
+            *) echo "::error::GitHub returned an unknown repository visibility."; exit 1 ;;
+          esac
+          echo "visibility=$VISIBILITY" >> "$GITHUB_OUTPUT"
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Verify exact stable tag and package version
+        id: release
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          [[ "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]
+          RELEASE_SHA=$(git rev-parse HEAD)
+          TAG_SHA=$(git rev-list -n 1 "refs/tags/$GITHUB_REF_NAME")
+          test "$RELEASE_SHA" = "$TAG_SHA"
+          test "$RELEASE_SHA" = "$GITHUB_SHA"
+          git show-ref --verify --quiet "refs/remotes/origin/$DEFAULT_BRANCH"
+          git merge-base --is-ancestor "$RELEASE_SHA" "refs/remotes/origin/$DEFAULT_BRANCH"
+          PACKAGE_VERSION=$(python - <<'PY'
+          import tomllib
+          with open('pyproject.toml', 'rb') as handle:
+              print(tomllib.load(handle)['project']['version'])
+          PY
+          )
+          test "${GITHUB_REF_NAME#v}" = "$PACKAGE_VERSION"
+          echo "version=$PACKAGE_VERSION" >> "$GITHUB_OUTPUT"
+      - name: Re-run exact-tag source and behavior gates
+        run: |
+          uv sync --frozen --group dev
+          uv run python -m compileall -q src tests scripts
+          uv run python -m unittest discover -s tests -p 'test_*.py'
+          uv run ruff check src tests scripts
+          uv run ruff format --check src tests scripts
+          uv run python scripts/check_source_safety.py
+          uv run bandit -q -r src/madpanda_discord_mcp -lll
+          uv export --frozen --no-dev --no-emit-project \
+            --format requirements-txt --output-file requirements.lock
+          git diff --exit-code -- requirements.lock
+          uv run pip-audit --requirement requirements.lock
+      - name: Build and verify tagged Python artifacts
+        run: |
+          uv build
+          uv run twine check dist/*
+          uv run python scripts/check_package_archives.py
+          python -m venv /tmp/discord-release-wheel-venv
+          /tmp/discord-release-wheel-venv/bin/python -m pip install \
+            --disable-pip-version-check --require-hashes \
+            --requirement requirements.lock
+          /tmp/discord-release-wheel-venv/bin/python -m pip install \
+            --disable-pip-version-check --no-deps dist/*.whl
+          RELEASE_VERSION="${GITHUB_REF_NAME#v}" /tmp/discord-release-wheel-venv/bin/python - <<'PY'
+          import os
+          from importlib.metadata import entry_points, version
+
+          os.environ.update({
+              'MCP_MODE': 'standalone',
+              'MCP_ACCESS_TOKEN': 'release-access-token-000000000000000000000000000',
+              'DISCORD_CREDENTIAL_MODE': 'server',
+              'DISCORD_TOKEN': 'synthetic-release-discord-token',
+              'DISCORD_GUILD_ID': str(123_456_789_012_345_678),
+              'DISCORD_ALLOWED_CHANNEL_IDS': 'ALL',
+              'MCP_BUILD_SHA': '0' * 40,
+          })
+          from madpanda_discord_mcp import __version__
+          from madpanda_discord_mcp.server import current_tool_manifest, mcp
+
+          release = os.environ['RELEASE_VERSION']
+          assert version('mad-mcp-discord') == release
+          assert __version__ == release
+          assert mcp._mcp_server.version == release
+          manifest = current_tool_manifest()
+          assert manifest['catalogVersion'] == 'discord-2026.07.18.1'
+          assert manifest['counts']['raw'] == 50
+          assert manifest['counts']['agentReady'] == 47
+          assert manifest['counts']['legacy'] == 3
+          scripts = {item.name: item.value for item in entry_points(group='console_scripts')}
+          assert scripts['mad-mcp-discord'] == 'madpanda_discord_mcp.server:main'
+          PY
+      - name: Scan exact tag history with Gitleaks
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            --volume "$PWD:/repo:ro" --workdir /repo \
+            "$GITLEAKS_IMAGE" git --config .gitleaks.toml \
+            --redact --verbose --no-banner .
+      - name: Validate workflow syntax and semantics
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /tmp/actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tar.gz" | sha256sum --check --strict
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          /tmp/actionlint
+      - name: Scan source configuration and secrets with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          scan-type: fs
+          scan-ref: .
+          scanners: misconfig,secret
+          format: table
+          exit-code: 1
+          severity: HIGH,CRITICAL
+      - name: Record Python artifact checksums
+        run: |
+          cd dist
+          sha256sum -- *.whl *.tar.gz > SHA256SUMS
+      - name: Attest Python release artifacts
+        if: steps.repository.outputs.visibility == 'public'
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: dist/*
+      - name: Compute exact-source fingerprint
+        id: source
+        run: echo "fingerprint=$(git archive --format=tar HEAD | sha256sum | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+      - name: Build release candidate
+        run: |
+          docker build \
+            --build-arg BUILD_SHA="$GITHUB_SHA" \
+            --build-arg SOURCE_FINGERPRINT="${{ steps.source.outputs.fingerprint }}" \
+            --build-arg IMAGE_VERSION="${GITHUB_REF_NAME#v}" \
+            --tag discord-mcp:release-candidate \
+            .
+      - name: Scan release candidate with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          image-ref: discord-mcp:release-candidate
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - name: Smoke release candidate in every credential profile
+        run: |
+          bash .github/scripts/smoke-image.sh \
+            discord-mcp:release-candidate \
+            "$GITHUB_SHA" \
+            "${{ steps.source.outputs.fingerprint }}" \
+            development
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      - name: Log in to GHCR
+        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Compute image tags and labels
+        id: meta
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,format=long,prefix=sha-
+            type=raw,value=latest
+      - name: Publish image with SBOM and provenance
+        id: push
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            BUILD_SHA=${{ github.sha }}
+            SOURCE_FINGERPRINT=${{ steps.source.outputs.fingerprint }}
+            IMAGE_VERSION=${{ steps.release.outputs.version }}
+          sbom: true
+          provenance: mode=max
+      - name: Scan exact published digest with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          image-ref: ${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - name: Attest published image
+        if: steps.repository.outputs.visibility == 'public'
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-name: ${{ env.IMAGE_NAME }}
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+      - name: Require anonymous pull access
+        run: |
+          docker logout ghcr.io
+          if ! docker manifest inspect "${IMAGE_NAME}@${{ steps.push.outputs.digest }}" >/dev/null; then
+            echo "::error::The Discord MCP GHCR package is not public. A package owner must make only this linked package public, then rerun this exact tagged workflow."
+            exit 1
+          fi
+          docker pull "${IMAGE_NAME}@${{ steps.push.outputs.digest }}"
+      - name: Require public source before release finalization
+        env:
+          REPOSITORY_VISIBILITY: ${{ steps.repository.outputs.visibility }}
+        run: |
+          if [[ "$REPOSITORY_VISIBILITY" != public ]]; then
+            echo "::error::The exact tagged workflow must be rerun after the canonical source repository is public so release attestations are complete."
+            exit 1
+          fi
+      - name: Validate Compose selection at the published digest
+        env:
+          MCP_MODE: portal
+          MCP_PORTAL_GRANT_TOKEN: release-portal-grant-000000000000000000000000000000000000000000
+          MCP_RUNTIME_IMAGE: ${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+          MCP_IMAGE_REFERENCE: ${{ env.IMAGE_NAME }}@${{ steps.push.outputs.digest }}
+        run: |
+          docker compose config --format json > /tmp/discord-published.json
+          EXPECTED_IMAGE="${MCP_RUNTIME_IMAGE}" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          config = json.loads(Path('/tmp/discord-published.json').read_text())
+          service = config['services']['discord-mcp']
+          assert service['image'] == os.environ['EXPECTED_IMAGE']
+          assert service['environment']['MCP_IMAGE_REFERENCE'] == os.environ['EXPECTED_IMAGE']
+          assert service['environment']['MCP_MODE'] == 'portal'
+          assert service['environment']['DISCORD_CREDENTIAL_MODE'] == ''
+          assert 'MCP_BUILD_SHA' not in service['environment']
+          assert 'MCP_SOURCE_FINGERPRINT' not in service['environment']
+          PY
+      - name: Smoke exact anonymously pulled digest
+        run: |
+          bash .github/scripts/smoke-image.sh \
+            "${IMAGE_NAME}@${{ steps.push.outputs.digest }}" \
+            "$GITHUB_SHA" \
+            "${{ steps.source.outputs.fingerprint }}" \
+            "${IMAGE_NAME}@${{ steps.push.outputs.digest }}"
+      - name: Create GitHub Release with package artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE_DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/* --clobber
+            gh release view "$GITHUB_REF_NAME" --json body --jq .body \
+              > /tmp/discord-mcp-release-notes.md
+            python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          notes_path = Path('/tmp/discord-mcp-release-notes.md')
+          notes = notes_path.read_text()
+          digest_line = f"Container: `{os.environ['IMAGE_NAME']}@{os.environ['IMAGE_DIGEST']}`"
+          pattern = r"(?m)^Container: `ghcr\.io/madpanda3d/discord-mcp-server@sha256:[0-9a-f]{64}`$"
+          if re.search(pattern, notes):
+              notes = re.sub(pattern, digest_line, notes)
+          else:
+              notes = f"{notes.rstrip()}\n\n{digest_line}\n"
+          notes_path.write_text(notes)
+          PY
+            gh release edit "$GITHUB_REF_NAME" \
+              --verify-tag \
+              --title "MADPANDA3D Discord MCP $GITHUB_REF_NAME" \
+              --notes-file /tmp/discord-mcp-release-notes.md \
+              --latest
+          else
+            gh release create "$GITHUB_REF_NAME" dist/* \
+              --verify-tag \
+              --title "MADPANDA3D Discord MCP $GITHUB_REF_NAME" \
+              --generate-notes \
+              --notes "Container: \`${IMAGE_NAME}@${IMAGE_DIGEST}\`" \
+              --latest
+          fi

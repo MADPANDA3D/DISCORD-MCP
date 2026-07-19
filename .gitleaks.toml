@@ -1,0 +1,4 @@
+title = "Discord MCP public-source secret policy"
+
+[extend]
+useDefault = true

@@ -1,0 +1,269 @@
+name: Verify
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  GITLEAKS_IMAGE: ghcr.io/gitleaks/gitleaks@sha256:b109bc5f8f76a38196a3e413704fc5b9e3c32360bce4e4b603bd6f45b3721dbb
+  UV_VERSION: 0.11.29
+
+jobs:
+  secret-scan:
+    name: Secret and workflow scan
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out full publishable history
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Scan source and history with Gitleaks
+        run: |
+          docker run --rm --user "$(id -u):$(id -g)" \
+            --volume "$PWD:/repo:ro" --workdir /repo \
+            "$GITLEAKS_IMAGE" git --config .gitleaks.toml \
+            --redact --verbose --no-banner .
+      - name: Validate workflow syntax and semantics
+        env:
+          ACTIONLINT_VERSION: 1.7.12
+          ACTIONLINT_SHA256: 8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8
+        run: |
+          curl --fail --location --silent --show-error \
+            --output /tmp/actionlint.tar.gz \
+            "https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}/actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz"
+          echo "${ACTIONLINT_SHA256}  /tmp/actionlint.tar.gz" | sha256sum --check --strict
+          tar -xzf /tmp/actionlint.tar.gz -C /tmp actionlint
+          /tmp/actionlint
+
+  source-scan:
+    name: Public source and filesystem scan
+    runs-on: ubuntu-24.04
+    needs: secret-scan
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Enforce public-source boundary
+        run: python3 scripts/check_source_safety.py
+      - name: Scan source configuration and secrets with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          scan-type: fs
+          scan-ref: .
+          scanners: misconfig,secret
+          format: table
+          exit-code: 1
+          severity: HIGH,CRITICAL
+
+  test:
+    name: Python ${{ matrix.python }}
+    runs-on: ubuntu-24.04
+    needs: [secret-scan, source-scan]
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12.13', '3.13.11']
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Install exact locked environment
+        run: uv sync --frozen --group dev
+      - name: Verify exported runtime lock is current
+        if: matrix.python == '3.12.13'
+        run: |
+          uv export --frozen --no-dev --no-emit-project \
+            --format requirements-txt --output-file requirements.lock
+          git diff --exit-code -- requirements.lock
+      - name: Compile public Python sources
+        run: uv run python -m compileall -q src tests scripts
+      - name: Run provider-free test suite
+        run: uv run python -m unittest discover -s tests -p 'test_*.py'
+      - name: Catch lint failures
+        run: uv run ruff check src tests scripts
+      - name: Enforce deterministic formatting
+        run: uv run ruff format --check src tests scripts
+      - name: Reject high-severity source findings
+        if: matrix.python == '3.12.13'
+        run: uv run bandit -q -r src/madpanda_discord_mcp -lll
+      - name: Audit locked runtime dependencies
+        if: matrix.python == '3.12.13'
+        run: uv run pip-audit --requirement requirements.lock
+
+  package:
+    name: Python package
+    runs-on: ubuntu-24.04
+    needs: test
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: 3.12.13
+      - name: Set up uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: ${{ env.UV_VERSION }}
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - name: Build and inspect wheel and source archive
+        run: |
+          uv sync --frozen --group dev
+          uv build
+          uv run twine check dist/*
+          uv run python scripts/check_package_archives.py
+      - name: Install and inspect the exact wheel
+        run: |
+          python -m venv /tmp/discord-wheel-venv
+          /tmp/discord-wheel-venv/bin/python -m pip install \
+            --disable-pip-version-check --require-hashes \
+            --requirement requirements.lock
+          /tmp/discord-wheel-venv/bin/python -m pip install \
+            --disable-pip-version-check --no-deps dist/*.whl
+          /tmp/discord-wheel-venv/bin/python - <<'PY'
+          import os
+          from importlib.metadata import entry_points, version
+          from importlib.resources import files
+
+          os.environ.update({
+              'MCP_MODE': 'standalone',
+              'MCP_ACCESS_TOKEN': 'wheel-access-token-0000000000000000000000000000',
+              'DISCORD_CREDENTIAL_MODE': 'server',
+              'DISCORD_TOKEN': 'synthetic-wheel-discord-token',
+              'DISCORD_GUILD_ID': str(123_456_789_012_345_678),
+              'DISCORD_ALLOWED_CHANNEL_IDS': 'ALL',
+              'MCP_BUILD_SHA': '0' * 40,
+          })
+          from madpanda_discord_mcp import __version__
+          from madpanda_discord_mcp.server import current_tool_manifest, mcp
+
+          assert version('mad-mcp-discord') == '1.0.0'
+          assert __version__ == '1.0.0'
+          assert mcp._mcp_server.version == '1.0.0'
+          manifest = current_tool_manifest()
+          assert manifest['catalogVersion'] == 'discord-2026.07.18.1'
+          assert manifest['counts'] == {
+              'raw': 50,
+              'agentReady': 47,
+              'legacy': 3,
+              'hidden': 0,
+              'documented': 50,
+          }
+          assert files('madpanda_discord_mcp').joinpath('py.typed').is_file()
+          matches = [
+              item for item in entry_points(group='console_scripts')
+              if item.name == 'mad-mcp-discord'
+          ]
+          assert len(matches) == 1
+          assert matches[0].value == 'madpanda_discord_mcp.server:main'
+          PY
+
+  image:
+    name: Hardened authenticated image
+    runs-on: ubuntu-24.04
+    needs: [test, package]
+    steps:
+      - name: Check out source
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Validate standalone and Portal Compose modes
+        env:
+          MCP_ACCESS_TOKEN: ci-standalone-token-000000000000000000000000000000000000000000
+          MCP_PORTAL_GRANT_TOKEN: ci-portal-grant-000000000000000000000000000000000000000000
+          MCP_BUILD_SHA: '0000000000000000000000000000000000000001'
+          MCP_SOURCE_FINGERPRINT: '1111111111111111111111111111111111111111111111111111111111111111'
+          MCP_IMAGE_REFERENCE: development
+        run: |
+          MCP_MODE=standalone DISCORD_CREDENTIAL_MODE=server \
+            docker compose config --quiet
+          MCP_MODE=standalone DISCORD_CREDENTIAL_MODE=server \
+            docker compose config --format json > /tmp/discord-standalone.json
+          MCP_MODE=portal DISCORD_CREDENTIAL_MODE= \
+            docker compose config --quiet
+          MCP_MODE=portal DISCORD_CREDENTIAL_MODE= \
+            docker compose config --format json > /tmp/discord-portal.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          for name, mode, credential_mode in (
+              ('standalone', 'standalone', 'server'),
+              ('portal', 'portal', ''),
+          ):
+              config = json.loads(Path(f'/tmp/discord-{name}.json').read_text())
+              assert config['name'] == 'discord-mcp'
+              service = config['services']['discord-mcp']
+              assert service['image'] == 'discord-mcp:local-source'
+              assert service['user'] == '10001:10001'
+              assert service['read_only'] is True
+              assert service['cap_drop'] == ['ALL']
+              assert service['security_opt'] == ['no-new-privileges:true']
+              assert service['pids_limit'] == 256
+              assert service['init'] is True
+              assert not service.get('volumes')
+              assert service['environment']['MCP_MODE'] == mode
+              assert service['environment']['DISCORD_CREDENTIAL_MODE'] == credential_mode
+              assert 'MCP_BUILD_SHA' not in service['environment']
+              assert 'MCP_SOURCE_FINGERPRINT' not in service['environment']
+              assert service['build']['args']['BUILD_SHA'] == '0000000000000000000000000000000000000001'
+              assert service['build']['args']['SOURCE_FINGERPRINT'] == '1' * 64
+              assert service['build']['args']['IMAGE_VERSION'] == '1.0.0'
+              ports = service['ports']
+              assert len(ports) == 1
+              assert ports[0]['host_ip'] == '127.0.0.1'
+              assert ports[0]['target'] == 8085
+          PY
+      - name: Build exact source
+        id: source
+        run: |
+          SOURCE_FINGERPRINT=$(git archive --format=tar HEAD | sha256sum | awk '{print $1}')
+          echo "fingerprint=$SOURCE_FINGERPRINT" >> "$GITHUB_OUTPUT"
+          docker build \
+            --build-arg BUILD_SHA="$GITHUB_SHA" \
+            --build-arg SOURCE_FINGERPRINT="$SOURCE_FINGERPRINT" \
+            --build-arg IMAGE_VERSION=1.0.0 \
+            --tag discord-mcp:ci \
+            .
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          image-ref: discord-mcp:ci
+          format: table
+          exit-code: 1
+          ignore-unfixed: true
+          severity: HIGH,CRITICAL
+      - name: Smoke all credential profiles without provider network
+        run: |
+          bash .github/scripts/smoke-image.sh \
+            discord-mcp:ci \
+            "$GITHUB_SHA" \
+            "${{ steps.source.outputs.fingerprint }}" \
+            development

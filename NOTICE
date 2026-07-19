@@ -1,0 +1,20 @@
+MADPANDA3D Discord MCP
+Copyright (c) 2026 MADPANDA3D
+
+This project includes and modifies work from SaseQ's Discord MCP project:
+https://github.com/SaseQ/discord-mcp
+
+That work is licensed under the MIT License. The original 2025 SaseQ
+copyright and license text are preserved in LICENSE.
+
+MADPANDA3D modifications include the Python/FastMCP implementation,
+authenticated standalone and Portal modes, request-scoped credential and
+tenant policy boundaries, deterministic tool metadata, security hardening,
+packaging, documentation, containers, and release automation.
+
+The Discord MCP logo and icon originate in the SaseQ project under MIT. The
+repository header image is a MADPANDA3D asset. See docs/provenance.md for the
+exact Git object lineage.
+
+Discord is a trademark of Discord Inc. This project is not affiliated with,
+endorsed by, or sponsored by Discord Inc.
