@@ -93,7 +93,7 @@ jobs:
         run: |
           MCP_MODE=standalone DISCORD_CREDENTIAL_MODE=server \
             docker compose config --format json > /tmp/discord-source.json
-          MCP_MODE=portal DISCORD_CREDENTIAL_MODE= \
+          MCP_MODE=portal DISCORD_CREDENTIAL_MODE='' \
             MCP_RUNTIME_IMAGE=ghcr.io/madpanda3d/discord-mcp-server@sha256:2222222222222222222222222222222222222222222222222222222222222222 \
             MCP_IMAGE_REFERENCE=ghcr.io/madpanda3d/discord-mcp-server@sha256:2222222222222222222222222222222222222222222222222222222222222222 \
             docker compose config --format json > /tmp/discord-digest.json

@@ -205,9 +205,9 @@ jobs:
             docker compose config --quiet
           MCP_MODE=standalone DISCORD_CREDENTIAL_MODE=server \
             docker compose config --format json > /tmp/discord-standalone.json
-          MCP_MODE=portal DISCORD_CREDENTIAL_MODE= \
+          MCP_MODE=portal DISCORD_CREDENTIAL_MODE='' \
             docker compose config --quiet
-          MCP_MODE=portal DISCORD_CREDENTIAL_MODE= \
+          MCP_MODE=portal DISCORD_CREDENTIAL_MODE='' \
             docker compose config --format json > /tmp/discord-portal.json
           python - <<'PY'
           import json
