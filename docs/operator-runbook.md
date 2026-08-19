@@ -86,7 +86,7 @@ token in shell history. The minimum wire checks are:
 2. `/mcp` without service authentication returns `401` before parsing malformed input.
 3. A wrong service credential returns `401` without reflection.
 4. An untrusted `Origin` returns `403`.
-5. MCP `initialize` reports server version `1.0.0`.
+5. MCP `initialize` reports server version `1.0.1`.
 6. `tools/list` returns exactly 52 tools.
 7. `list_capabilities` returns the expected catalog and descriptor hash without a Discord call.
 8. `check_configuration` reports ready for the intended provider mode.
