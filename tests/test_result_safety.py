@@ -122,6 +122,20 @@ class ResultSafetyTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(safe_payload["ordinary"], "preserved")
             self.assertTrue(any(str(key).startswith("[REDACTED_KEY_") for key in safe_payload))
 
+    def test_only_trusted_catalog_output_preserves_secret_named_schema_fields(self):
+        schema = {
+            "type": "object",
+            "properties": {"webhook_url": {"type": "string"}},
+        }
+        provider_result = self.server.finalize_tool_result(schema, tool_name="provider_tool")
+        catalog_result = self.server.finalize_tool_result(
+            schema,
+            tool_name="list_capabilities",
+        )
+
+        self.assertEqual(provider_result["properties"]["webhook_url"], "[REDACTED]")
+        self.assertEqual(catalog_result, schema)
+
     async def test_provider_and_navigation_wrappers_share_schema_valid_boundary(self):
         self.assertTrue(self.server.is_navigation_tool("check_configuration"))
         self.assertFalse(self.server.is_navigation_tool("discord_job_status"))

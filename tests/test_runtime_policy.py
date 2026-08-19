@@ -249,8 +249,10 @@ class RuntimePolicyTests(unittest.IsolatedAsyncioTestCase):
             "delete_channel",
             "create_category",
             "delete_category",
+            "create_webhook",
             "delete_webhook",
             "list_webhooks",
+            "send_webhook_message",
         }
         actual = {
             tool["nativeToolName"]

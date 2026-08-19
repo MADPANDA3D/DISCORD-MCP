@@ -20,7 +20,7 @@
 <pre align="center">
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  DISCOVER  ──▶  SCOPE  ──▶  READ  ──▶  CONFIRM  ──▶  MUTATE  ──▶  VERIFY │
-│      50          tenant       safe       exact          policy       typed  │
+│      52          tenant       safe       exact          policy       typed  │
 │     tools         bounds     defaults    phrase         gates        result │
 └────────────────────────────────────────────────────────────────────────────┘
 </pre>
@@ -39,8 +39,8 @@ It is designed around four boundaries:
 - **Typed discovery** keeps the runtime registry, schemas, catalog, and documentation aligned.
 
 This is not an unauthenticated proxy or an arbitrary Discord API client. It does not expose raw
-Gateway access, OAuth installation, application-command management, webhook creation or execution,
-or complete Discord API coverage.
+Gateway access, OAuth installation, application-command management, webhook credentials, or
+complete Discord API coverage. Three legacy webhook tools remain hidden from agent discovery.
 
 ## Access modes
 
@@ -163,12 +163,12 @@ See [Portal compatibility](docs/portal-compat.md) for the complete broker and ad
 
 ## Tool inventory
 
-The immutable catalog `discord-2026.07.18.1` contains **50 registered tools**:
+The immutable catalog `discord-2026.08.19.1` contains **52 registered tools**:
 
-- **47 agent-ready**
+- **46 agent-ready**
 - **3 legacy compatibility tools**
-- **0 hidden**
-- **21 read, 13 write, 16 destructive**
+- **3 hidden compatibility tools**
+- **21 read, 15 write, 16 destructive**
 
 <details>
 <summary><strong>Show all tools by domain</strong></summary>
@@ -188,7 +188,7 @@ The immutable catalog `discord-2026.07.18.1` contains **50 registered tools**:
 | Roles | `add_role`, `remove_role` |
 | Direct messages | `send_private_message`, `edit_private_message`, `delete_private_message`, `read_private_messages` |
 | Audits | `channel_daily_audit`, `daily_audit_job_submit`, `daily_audit_job_status`, `daily_audit_job_next` |
-| Webhooks | `delete_webhook`, `list_webhooks` |
+| Webhooks | `create_webhook`, `delete_webhook`, `list_webhooks`, `send_webhook_message` |
 | Legacy operations | `discord_smoke_test`, `discord_job_submit`, `discord_job_status` |
 
 </details>
@@ -197,8 +197,9 @@ Use `find_tools` for intent search, `get_tool_usage` for the exact descriptor, a
 `list_capabilities(include_descriptors=true)` for the lossless catalog. Every descriptor includes
 input/output schemas, risk annotations, admin state, confirmation policy, tier, and a stable hash.
 
-The full risk and permission matrix lives in [Tool catalog](docs/tool-catalog.md). Coverage and
-intentional exclusions are recorded in [Endpoint coverage](docs/endpoint-coverage.md).
+The full risk and permission matrix lives in [Tool catalog](docs/tool-catalog.md). The frozen
+tool-by-tool parity proof lives in [Compatibility matrix](docs/compatibility-matrix.md). Coverage
+and intentional exclusions are recorded in [Endpoint coverage](docs/endpoint-coverage.md).
 
 ## Safety policy
 

@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and releases use
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Restored the preserved 52-tool Discord contract, including three hidden webhook compatibility
+  tools, while keeping credential-bearing webhook URLs out of results and logs.
+- Added a machine-checked compatibility projection and the full tool-by-tool parity matrix.
+- Raised `aiohttp` and `cryptography` to patched security floors and regenerated both lock surfaces
+  with the repository-pinned uv version.
+
 ## [1.0.0] - 2026-07-19
 
 ### Added

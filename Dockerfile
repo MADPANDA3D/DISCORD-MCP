@@ -63,7 +63,7 @@ ENV PATH="/opt/discord-mcp/bin:${PATH}" \
     MCP_BUILD_SHA="${BUILD_SHA}" \
     MCP_SOURCE_FINGERPRINT="${SOURCE_FINGERPRINT}" \
     MCP_IMAGE_REFERENCE=development \
-    MCP_EXPECTED_TOOL_COUNT=50 \
+    MCP_EXPECTED_TOOL_COUNT=52 \
     MCP_ALLOWED_HOSTS=localhost:*,127.0.0.1:*,[::1]:*,discord-mcp:* \
     MCP_ALLOWED_ORIGINS=""
 

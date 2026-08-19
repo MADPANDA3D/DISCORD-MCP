@@ -1,15 +1,15 @@
 # Tool catalog
 
-Catalog: `discord-2026.07.18.1`
+Catalog: `discord-2026.08.19.1`
 
 | Contract field | Value |
 |---|---:|
-| Registered | 50 |
-| Agent-ready | 47 |
+| Registered | 52 |
+| Agent-ready | 46 |
 | Legacy | 3 |
-| Hidden | 0 |
+| Hidden | 3 |
 | Read | 21 |
-| Write | 13 |
+| Write | 15 |
 | Destructive | 16 |
 
 Risk is an execution-planning signal, not a substitute for Discord permissions or operator review:
@@ -67,8 +67,10 @@ operator aid; Discord remains authoritative for the exact permission calculation
 | `delete_category` | Categories | Destructive | Agent-ready | Admin + confirm | Manage Channels |
 | `find_category` | Categories | Read | Agent-ready | Standard | View Channel |
 | `list_channels_in_category` | Categories | Read | Agent-ready | Standard | View Channel |
+| `create_webhook` | Webhooks | Write | Hidden | Admin + confirm | Manage Webhooks; URL output redacted |
 | `delete_webhook` | Webhooks | Destructive | Agent-ready | Admin + confirm | Manage Webhooks |
-| `list_webhooks` | Webhooks | Read | Agent-ready | Admin | Manage Webhooks |
+| `list_webhooks` | Webhooks | Read | Hidden | Admin + confirm | Manage Webhooks + write allowlist; URLs omitted |
+| `send_webhook_message` | Webhooks | Write | Hidden | Admin + confirm + all-channel policy | Separately supplied Discord webhook URL |
 | `check_configuration` | Navigation | Read | Agent-ready | Service auth | No Discord call |
 | `list_capabilities` | Navigation | Read | Agent-ready | Service auth | No Discord call |
 | `get_endpoint_coverage` | Navigation | Read | Agent-ready | Service auth | No Discord call |

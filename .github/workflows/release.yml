@@ -224,10 +224,11 @@ jobs:
           assert __version__ == release
           assert mcp._mcp_server.version == release
           manifest = current_tool_manifest()
-          assert manifest['catalogVersion'] == 'discord-2026.07.18.1'
-          assert manifest['counts']['raw'] == 50
-          assert manifest['counts']['agentReady'] == 47
+          assert manifest['catalogVersion'] == 'discord-2026.08.19.1'
+          assert manifest['counts']['raw'] == 52
+          assert manifest['counts']['agentReady'] == 46
           assert manifest['counts']['legacy'] == 3
+          assert manifest['counts']['hidden'] == 3
           scripts = {item.name: item.value for item in entry_points(group='console_scripts')}
           assert scripts['mad-mcp-discord'] == 'madpanda_discord_mcp.server:main'
           PY

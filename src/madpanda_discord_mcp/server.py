@@ -420,7 +420,7 @@ def registered_tool_count() -> int:
                 return len(tools)
         except Exception:
             pass
-    return 47
+    return 52
 
 
 def parse_bool(value) -> bool:
@@ -2508,13 +2508,22 @@ def scrub_state_secrets(payload: Any, *, secrets: tuple[str, ...] | None = None)
     return payload
 
 
-def scrub_output_secrets(payload: Any, *, secrets: tuple[str, ...] | None = None) -> Any:
+def scrub_output_secrets(
+    payload: Any,
+    *,
+    secrets: tuple[str, ...] | None = None,
+    preserve_schema_keys: bool = False,
+    schema_properties: bool = False,
+) -> Any:
     """Remove credential material without redacting requested message content."""
 
     if secrets is None:
         secrets = active_secret_values()
     if isinstance(payload, dict):
         scrubbed = {}
+        is_json_schema = payload.get("type") == "object" and isinstance(
+            payload.get("properties"), dict
+        )
         for index, (key, value) in enumerate(payload.items(), start=1):
             safe_key = scrub_secret_mapping_key(
                 key,
@@ -2522,17 +2531,48 @@ def scrub_output_secrets(payload: Any, *, secrets: tuple[str, ...] | None = None
                 index=index,
             )
             normalized_key = re.sub(r"[^a-z0-9]", "", str(key).lower())
-            if normalized_key in OUTPUT_SECRET_KEY_NAMES or normalized_key.endswith(
+            if schema_properties:
+                scrubbed[safe_key] = scrub_output_secrets(
+                    value,
+                    secrets=secrets,
+                    preserve_schema_keys=preserve_schema_keys,
+                )
+            elif preserve_schema_keys and is_json_schema and key == "properties":
+                scrubbed[safe_key] = scrub_output_secrets(
+                    value,
+                    secrets=secrets,
+                    preserve_schema_keys=True,
+                    schema_properties=True,
+                )
+            elif normalized_key in OUTPUT_SECRET_KEY_NAMES or normalized_key.endswith(
                 OUTPUT_SECRET_KEY_SUFFIXES
             ):
                 scrubbed[safe_key] = "[REDACTED]"
             else:
-                scrubbed[safe_key] = scrub_output_secrets(value, secrets=secrets)
+                scrubbed[safe_key] = scrub_output_secrets(
+                    value,
+                    secrets=secrets,
+                    preserve_schema_keys=preserve_schema_keys,
+                )
         return scrubbed
     if isinstance(payload, list):
-        return [scrub_output_secrets(item, secrets=secrets) for item in payload]
+        return [
+            scrub_output_secrets(
+                item,
+                secrets=secrets,
+                preserve_schema_keys=preserve_schema_keys,
+            )
+            for item in payload
+        ]
     if isinstance(payload, tuple):
-        return tuple(scrub_output_secrets(item, secrets=secrets) for item in payload)
+        return tuple(
+            scrub_output_secrets(
+                item,
+                secrets=secrets,
+                preserve_schema_keys=preserve_schema_keys,
+            )
+            for item in payload
+        )
     if isinstance(payload, str):
         return scrub_secret_text(payload, secrets)
     return payload
@@ -2619,7 +2659,10 @@ def tool_result_boundary_error(
 
 def finalize_tool_result(payload: Any, *, tool_name: str = "") -> Any:
     try:
-        safe_payload = scrub_output_secrets(payload)
+        safe_payload = scrub_output_secrets(
+            payload,
+            preserve_schema_keys=tool_name == "list_capabilities",
+        )
     except RecursionError:
         return nonserializable_tool_result_error()
     max_output_bytes = tool_output_limit_for(safe_payload, tool_name)
@@ -8156,6 +8199,81 @@ async def list_channels_in_category(category_id: str, guild_id: str = "") -> dic
 
 
 @mcp.tool()
+async def create_webhook(
+    channel_id: str,
+    name: str,
+    confirm: str = "",
+) -> dict:
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    warnings = []
+    resolved_channel_id = None
+    try:
+        normalized_name = (name or "").strip()
+        if not normalized_name:
+            error = build_error("invalid_payload", "webhook name cannot be null.")
+            return error_with_log("create_webhook", start_time, request_id, error)
+        if len(normalized_name) > 80:
+            error = build_error("invalid_payload", "webhook name exceeds 80 characters.")
+            return error_with_log("create_webhook", start_time, request_id, error)
+
+        resolved_channel_id = resolve_channel_id(channel_id)
+        confirm_error = require_confirm(
+            confirm,
+            "create_webhook",
+            start_time,
+            request_id,
+            warnings=warnings,
+            channel_id=resolved_channel_id,
+        )
+        if confirm_error:
+            return confirm_error
+        allow_error = require_write_allowed(
+            resolved_channel_id,
+            "create_webhook",
+            start_time,
+            request_id,
+            warnings=warnings,
+        )
+        if allow_error:
+            return allow_error
+
+        channel = await get_text_channel(resolved_channel_id)
+        webhook = await channel.create_webhook(name=normalized_name)
+        record_api_success("create_webhook")
+        log_action(
+            "create_webhook",
+            start_time,
+            "ok",
+            guild_id=channel.guild.id,
+            channel_id=resolved_channel_id,
+        )
+        meta = build_meta(
+            start_time,
+            request_id=request_id,
+            warnings=warnings,
+            guild_id=channel.guild.id,
+            channel_id=resolved_channel_id,
+        )
+        data = {
+            "webhook_id": str(webhook.id),
+            "name": webhook.name,
+            "url": webhook.url,
+        }
+        return success_response(data, meta)
+    except Exception as exc:
+        error = exception_to_error(exc)
+        return error_with_log(
+            "create_webhook",
+            start_time,
+            request_id,
+            error,
+            warnings=warnings,
+            channel_id=resolved_channel_id,
+        )
+
+
+@mcp.tool()
 async def delete_webhook(webhook_id: str, confirm: str = "") -> dict:
     start_time = time.perf_counter()
     request_id = str(uuid.uuid4())
@@ -8232,14 +8350,24 @@ async def delete_webhook(webhook_id: str, confirm: str = "") -> dict:
 
 
 @mcp.tool()
-async def list_webhooks(channel_id: str) -> dict:
+async def list_webhooks(channel_id: str, confirm: str = "") -> dict:
     start_time = time.perf_counter()
     request_id = str(uuid.uuid4())
     warnings = []
     resolved_channel_id = None
     try:
         resolved_channel_id = resolve_channel_id(channel_id)
-        allow_error = require_read_allowed(
+        confirm_error = require_confirm(
+            confirm,
+            "list_webhooks",
+            start_time,
+            request_id,
+            warnings=warnings,
+            channel_id=resolved_channel_id,
+        )
+        if confirm_error:
+            return confirm_error
+        allow_error = require_write_allowed(
             resolved_channel_id,
             "list_webhooks",
             start_time,
@@ -8288,6 +8416,73 @@ async def list_webhooks(channel_id: str) -> dict:
             error,
             warnings=warnings,
             channel_id=resolved_channel_id,
+        )
+
+
+@mcp.tool()
+async def send_webhook_message(
+    webhook_url: str,
+    message: str,
+    confirm: str = "",
+) -> dict:
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    warnings = []
+    try:
+        if not webhook_url:
+            error = build_error("invalid_payload", "webhookUrl cannot be null.")
+            return error_with_log("send_webhook_message", start_time, request_id, error)
+        if WEBHOOK_CREDENTIAL_PATTERN.fullmatch(webhook_url) is None:
+            error = build_error(
+                "invalid_payload",
+                "webhookUrl must be a complete HTTPS Discord webhook URL.",
+            )
+            return error_with_log("send_webhook_message", start_time, request_id, error)
+        if not message:
+            error = build_error("invalid_payload", "message cannot be null.")
+            return error_with_log("send_webhook_message", start_time, request_id, error)
+        if len(message) > 2000:
+            error = build_error("invalid_payload", "message exceeds 2000 characters.")
+            return error_with_log("send_webhook_message", start_time, request_id, error)
+
+        confirm_error = require_confirm(
+            confirm,
+            "send_webhook_message",
+            start_time,
+            request_id,
+            warnings=warnings,
+        )
+        if confirm_error:
+            return confirm_error
+        writes_error = require_writes_enabled(
+            "send_webhook_message",
+            start_time,
+            request_id,
+            warnings=warnings,
+        )
+        if writes_error:
+            return writes_error
+
+        timeout = aiohttp.ClientTimeout(total=30)
+        async with aiohttp.ClientSession(timeout=timeout, trust_env=False) as session:
+            webhook = discord.Webhook.from_url(webhook_url, session=session)
+            sent = await webhook.send(message, wait=True)
+        record_api_success("send_webhook_message")
+        log_action("send_webhook_message", start_time, "ok")
+        meta = build_meta(start_time, request_id=request_id, warnings=warnings)
+        data = {
+            "message_id": str(sent.id) if sent else None,
+            "jump_url": sent.jump_url if sent else None,
+        }
+        return success_response(data, meta)
+    except Exception as exc:
+        error = exception_to_error(exc)
+        return error_with_log(
+            "send_webhook_message",
+            start_time,
+            request_id,
+            error,
+            warnings=warnings,
         )
 
 
