@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-08-19
+
 ### Changed
 
 - Restored the preserved 52-tool Discord contract, including three hidden webhook compatibility
@@ -43,4 +45,5 @@ All notable changes to this project are documented here. The format follows
 - Webhook creation and token-URL execution tools.
 - Unauthenticated and permissive public-mode behavior.
 
+[1.0.1]: https://github.com/MADPANDA3D/DISCORD-MCP/releases/tag/v1.0.1
 [1.0.0]: https://github.com/MADPANDA3D/DISCORD-MCP/releases/tag/v1.0.0
