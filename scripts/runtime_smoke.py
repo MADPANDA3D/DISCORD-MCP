@@ -15,6 +15,7 @@ MODE = os.environ["MCP_MODE"]
 CREDENTIAL_MODE = os.environ["DISCORD_CREDENTIAL_MODE"]
 EXPECTED_TOOL_COUNT = int(os.getenv("MCP_EXPECTED_TOOL_COUNT", "52"))
 EXPECTED_AGENT_READY_COUNT = int(os.getenv("MCP_EXPECTED_AGENT_READY_COUNT", "46"))
+EXPECTED_HIDDEN_COUNT = int(os.getenv("MCP_EXPECTED_HIDDEN_COUNT", "3"))
 EXPECTED_BUILD_SHA = os.environ["MCP_BUILD_SHA"]
 EXPECTED_SOURCE_FINGERPRINT = os.environ["MCP_SOURCE_FINGERPRINT"]
 EXPECTED_IMAGE_REFERENCE = os.environ["MCP_IMAGE_REFERENCE"]
@@ -187,10 +188,14 @@ def main() -> None:
     listed = tools.get("result", {}).get("tools", []) if isinstance(tools, dict) else []
     require(len(listed) == EXPECTED_TOOL_COUNT, f"tools/list count={len(listed)}")
     names = {tool.get("name") for tool in listed if isinstance(tool, dict)}
-    for required_name in ("list_capabilities", "send_message", "delete_webhook"):
+    for required_name in (
+        "list_capabilities",
+        "send_message",
+        "create_webhook",
+        "delete_webhook",
+        "send_webhook_message",
+    ):
         require(required_name in names, f"missing tool: {required_name}")
-    require("create_webhook" not in names, "retired webhook credential tool is exposed")
-    require("send_webhook_message" not in names, "retired webhook credential tool is exposed")
 
     raw_response, capabilities = call_tool(
         discovery_headers,
@@ -202,7 +207,10 @@ def main() -> None:
     require(capabilities.get("ok") is True, f"capabilities={capabilities}")
     capability_data = capabilities.get("data", {})
     require(capability_data.get("catalogVersion") == EXPECTED_CATALOG_VERSION, str(capabilities))
-    require(capability_data.get("counts", {}).get("raw") == EXPECTED_TOOL_COUNT, str(capabilities))
+    counts = capability_data.get("counts", {})
+    require(counts.get("raw") == EXPECTED_TOOL_COUNT, str(capabilities))
+    require(counts.get("agentReady") == EXPECTED_AGENT_READY_COUNT, str(capabilities))
+    require(counts.get("hidden") == EXPECTED_HIDDEN_COUNT, str(capabilities))
     require(
         capability_data.get("descriptorHash") == health.get("descriptor_hash"),
         "health and navigation descriptor hashes differ",
