@@ -1,7 +1,7 @@
 # Discord endpoint coverage
 
 This document mirrors the runtime coverage contract in catalog
-`discord-2026.07.18.1`. The catalog is intentionally partial: a listed Discord domain does not
+`discord-2026.08.19.1`. The catalog is intentionally partial: a listed Discord domain does not
 imply complete API coverage.
 
 | Feature | Status | Exposed tools | Important exclusions |
@@ -12,7 +12,7 @@ imply complete API coverage.
 | Threads | Partial | 4 | Forum posts, membership, standalone private threads |
 | Members, roles, moderation | Partial | 9 | Bulk inventory, prune, voice mutation, role lifecycle |
 | Direct messages | Partial | 4 | Group-DM recipient management |
-| Webhooks | Partial | 2 | Creation and token-URL execution |
+| Webhooks | Partial | 4 | OAuth webhooks and webhook lifecycle beyond create/list/delete/send |
 | Audits and jobs | Provider extension | 6 | Durable distributed job orchestration |
 | OAuth, commands, Gateway management | Not exposed | 0 | Entire surface intentionally excluded |
 | Other Discord resources | Not exposed | 0 | Invites, emojis, stickers, events, automod, stages, commerce |
@@ -67,10 +67,12 @@ management is not implemented.
 
 ## Webhooks
 
-Tools: `list_webhooks`, `delete_webhook`.
+Tools: `create_webhook`, `list_webhooks`, `delete_webhook`, `send_webhook_message`.
 
-Only credential-safe listing and guarded deletion are exposed. Webhook creation and webhook-token
-execution are intentionally excluded because a Discord webhook URL is a bearer credential.
+The complete legacy tool-name and input contract remains registered, with all three legacy webhook
+helpers hidden and admin-gated. Creation preserves its historical result fields while the runtime
+redacts the credential-bearing URL; listing omits URLs; sending accepts only a separately supplied,
+fixed-origin Discord webhook URL and never logs or returns that credential.
 
 ## Audits and jobs
 

@@ -18,7 +18,7 @@ from typing import Any, Mapping
 SCHEMA_VERSION = "1.0.0"
 SERVICE_ID = "discord"
 SERVICE_ALIASES = ("discord-mcp", "discord_mcp", "discord server")
-CATALOG_VERSION = "discord-2026.07.18.1"
+CATALOG_VERSION = "discord-2026.08.19.1"
 REPOSITORY_DOCS_URL = "https://github.com/MADPANDA3D/DISCORD-MCP/blob/main/docs/tool-catalog.md"
 GUILD_DOCS = "https://docs.discord.com/developers/resources/guild"
 CHANNEL_DOCS = "https://docs.discord.com/developers/resources/channel"
@@ -645,6 +645,19 @@ _DEFINITIONS = (
         docs=GUILD_DOCS,
     ),
     _d(
+        "create_webhook",
+        "Create Discord Webhook",
+        "webhooks",
+        "an authorized operator must create a legacy webhook for one writable channel",
+        "creates a channel webhook while redacting its credential-bearing URL from results",
+        "webhook ID, name, and a redacted URL field",
+        aliases=("add_webhook",),
+        confirm=True,
+        admin=True,
+        docs=WEBHOOK_DOCS,
+        tier="hidden",
+    ),
+    _d(
         "delete_webhook",
         "Delete Discord Webhook",
         "webhooks",
@@ -667,8 +680,23 @@ _DEFINITIONS = (
         aliases=("get_webhooks",),
         read=True,
         idempotent=True,
+        confirm=True,
         admin=True,
         docs=WEBHOOK_DOCS,
+        tier="hidden",
+    ),
+    _d(
+        "send_webhook_message",
+        "Send Discord Webhook Message",
+        "webhooks",
+        "an authorized legacy client must send through a separately supplied Discord webhook URL",
+        "creates one bounded webhook message without logging or returning the webhook credential",
+        "created message ID and jump URL",
+        aliases=("post_webhook_message",),
+        confirm=True,
+        admin=True,
+        docs=WEBHOOK_DOCS,
+        tier="hidden",
     ),
     _d(
         "check_configuration",
@@ -810,6 +838,7 @@ PARAMETER_DESCRIPTIONS = {
     "user_id": "Discord user snowflake identifying the member or DM recipient.",
     "username": "Discord username, global name, or guild display name to resolve.",
     "webhook_id": "Discord webhook snowflake identifying the webhook to delete.",
+    "webhook_url": "Credential-bearing Discord webhook URL accepted only by the hidden legacy tool and never logged or returned.",
 }
 
 FILE_OBJECT_SCHEMA = {
@@ -1004,8 +1033,10 @@ OUTPUT_DATA_FIELDS = {
     "delete_category": ("category_id", "name"),
     "find_category": ("count", "categories"),
     "list_channels_in_category": ("count", "channels"),
+    "create_webhook": ("webhook_id", "name", "url"),
     "delete_webhook": ("webhook_id", "name"),
     "list_webhooks": ("count", "webhooks"),
+    "send_webhook_message": ("message_id", "jump_url"),
     "check_configuration": ("ready", "missing", "configuration", "capabilities"),
     "list_capabilities": (
         "schemaVersion",
@@ -1212,10 +1243,12 @@ ENDPOINT_COVERAGE = (
             "MANAGE_WEBHOOKS permission",
         ],
         "tools": [
+            "create_webhook",
             "delete_webhook",
             "list_webhooks",
+            "send_webhook_message",
         ],
-        "notes": "Credential-safe listing and deletion are exposed. Webhook creation and token-URL execution are intentionally excluded because webhook URLs are bearer credentials.",
+        "notes": "The complete legacy webhook contract is preserved as hidden, admin-gated tools. Creation output and listings never expose token-bearing URLs; execution accepts only a separately supplied Discord webhook URL.",
     },
     {
         "feature": "audits-and-jobs",

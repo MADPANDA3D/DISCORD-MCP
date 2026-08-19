@@ -47,6 +47,7 @@ class FakeChannel:
 
     def __init__(self, webhooks):
         self._webhooks = webhooks
+        self.create_webhook = AsyncMock(return_value=FakeWebhook())
 
     async def webhooks(self):
         return self._webhooks
@@ -55,6 +56,14 @@ class FakeChannel:
 class FakeClient:
     def __init__(self, webhook):
         self.fetch_webhook = AsyncMock(return_value=webhook)
+
+
+class FakeSession:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
 
 
 class WebhookSafetyTests(unittest.IsolatedAsyncioTestCase):
@@ -85,13 +94,100 @@ class WebhookSafetyTests(unittest.IsolatedAsyncioTestCase):
             self.runtime_policy(),
             patch.object(self.server, "get_text_channel", AsyncMock(return_value=channel)),
         ):
-            result = await self.server.list_webhooks(channel_id=str(CHANNEL_A))
+            result = await self.server.list_webhooks(
+                channel_id=str(CHANNEL_A),
+                confirm=self.server.CONFIRM_APPLY_VALUE,
+            )
 
         self.assertTrue(result["ok"], result)
         self.assertEqual(
             result["data"]["webhooks"],
             [{"id": str(WEBHOOK_ID), "name": "safe-webhook-name"}],
         )
+        serialized = json.dumps(result)
+        self.assertNotIn(WEBHOOK_URL, serialized)
+        self.assertNotIn(WEBHOOK_SECRET, serialized)
+
+    async def test_create_preserves_result_shape_without_exposing_the_url(self):
+        channel = FakeChannel([])
+        with (
+            self.runtime_policy(),
+            patch.object(self.server, "get_text_channel", AsyncMock(return_value=channel)),
+        ):
+            result = await self.server.create_webhook(
+                channel_id=str(CHANNEL_A),
+                name="safe-webhook-name",
+                confirm=self.server.CONFIRM_APPLY_VALUE,
+            )
+
+        self.assertTrue(result["ok"], result)
+        channel.create_webhook.assert_awaited_once_with(name="safe-webhook-name")
+        self.assertEqual(result["data"]["webhook_id"], str(WEBHOOK_ID))
+        self.assertEqual(result["data"]["name"], "safe-webhook-name")
+        self.assertEqual(result["data"]["url"], "[REDACTED_WEBHOOK_URL]")
+        serialized = json.dumps(result)
+        self.assertNotIn(WEBHOOK_URL, serialized)
+        self.assertNotIn(WEBHOOK_SECRET, serialized)
+
+    async def test_create_requires_admin_before_provider_work(self):
+        provider = AsyncMock()
+        with (
+            self.runtime_policy(admin=False),
+            patch.object(self.server, "get_text_channel", provider),
+        ):
+            result = await self.server.create_webhook(
+                channel_id=str(CHANNEL_A),
+                name="safe-webhook-name",
+                confirm=self.server.CONFIRM_APPLY_VALUE,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["type"], "permission_denied")
+        provider.assert_not_awaited()
+
+    async def test_send_rejects_non_discord_webhook_url_before_network_work(self):
+        session_factory = AsyncMock()
+        with (
+            self.runtime_policy(),
+            patch.object(self.server.aiohttp, "ClientSession", session_factory),
+        ):
+            result = await self.server.send_webhook_message(
+                webhook_url="https://example.com/api/webhooks/1/credential",
+                message="safe message",
+                confirm=self.server.CONFIRM_APPLY_VALUE,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["error"]["type"], "invalid_payload")
+        session_factory.assert_not_called()
+
+    async def test_send_is_bounded_and_uses_no_proxy_or_redirectable_origin(self):
+        sent = type(
+            "SentWebhookMessage",
+            (),
+            {"id": WEBHOOK_ID, "jump_url": "https://discord.com/channels/1/2/3"},
+        )()
+        webhook = type("WebhookSender", (), {"send": AsyncMock(return_value=sent)})()
+        with (
+            self.runtime_policy(),
+            patch.object(self.server, "ALLOW_ALL_CHANNELS", True),
+            patch.object(
+                self.server.aiohttp, "ClientSession", return_value=FakeSession()
+            ) as session,
+            patch.object(self.server.discord.Webhook, "from_url", return_value=webhook) as from_url,
+        ):
+            result = await self.server.send_webhook_message(
+                webhook_url=WEBHOOK_URL,
+                message="safe message",
+                confirm=self.server.CONFIRM_APPLY_VALUE,
+            )
+
+        self.assertTrue(result["ok"], result)
+        session.assert_called_once()
+        self.assertFalse(session.call_args.kwargs["trust_env"])
+        self.assertEqual(session.call_args.kwargs["timeout"].total, 30)
+        from_url.assert_called_once_with(WEBHOOK_URL, session=session.return_value)
+        webhook.send.assert_awaited_once_with("safe message", wait=True)
         serialized = json.dumps(result)
         self.assertNotIn(WEBHOOK_URL, serialized)
         self.assertNotIn(WEBHOOK_SECRET, serialized)

@@ -167,13 +167,13 @@ jobs:
           assert __version__ == '1.0.0'
           assert mcp._mcp_server.version == '1.0.0'
           manifest = current_tool_manifest()
-          assert manifest['catalogVersion'] == 'discord-2026.07.18.1'
+          assert manifest['catalogVersion'] == 'discord-2026.08.19.1'
           assert manifest['counts'] == {
-              'raw': 50,
-              'agentReady': 47,
+              'raw': 52,
+              'agentReady': 46,
               'legacy': 3,
-              'hidden': 0,
-              'documented': 50,
+              'hidden': 3,
+              'documented': 52,
           }
           assert files('madpanda_discord_mcp').joinpath('py.typed').is_file()
           matches = [

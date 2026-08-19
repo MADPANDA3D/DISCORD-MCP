@@ -92,9 +92,11 @@ provider_credentials:
     - x-discord-guild-id
     - x-discord-allowed-channels
 catalog:
-  version: discord-2026.07.18.1
-  raw_tools: 50
-  agent_ready_tools: 47
+  version: discord-2026.08.19.1
+  raw_tools: 52
+  agent_ready_tools: 46
+  legacy_tools: 3
+  hidden_tools: 3
 ```
 
 Replace the example host and secret reference in private operator configuration. Do not commit a

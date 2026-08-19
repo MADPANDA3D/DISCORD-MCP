@@ -1,3 +1,4 @@
+import hashlib
 import importlib
 import json
 import os
@@ -29,21 +30,60 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(manifest["schemaVersion"], "1.0.0")
         self.assertEqual(manifest["serviceId"], "discord")
-        self.assertEqual(manifest["catalogVersion"], "discord-2026.07.18.1")
+        self.assertEqual(manifest["catalogVersion"], "discord-2026.08.19.1")
         self.assertEqual(
             manifest["counts"],
             {
-                "raw": 50,
-                "agentReady": 47,
+                "raw": 52,
+                "agentReady": 46,
                 "legacy": 3,
-                "hidden": 0,
-                "documented": 50,
+                "hidden": 3,
+                "documented": 52,
             },
         )
-        self.assertEqual(len(self.server.mcp._tool_manager._tools), 50)
+        self.assertEqual(len(self.server.mcp._tool_manager._tools), 52)
         self.assertEqual(
             [tool["nativeToolName"] for tool in manifest["tools"]],
             list(self.manifest_module.TOOL_DEFINITIONS),
+        )
+
+    def test_preserved_legacy_contract_and_approved_controls_are_immutable(self):
+        manifest = self.server.current_tool_manifest()
+        compatibility = []
+        controls = []
+        for tool in sorted(manifest["tools"], key=lambda item: item["nativeToolName"]):
+            compatibility.append(
+                {
+                    "name": tool["nativeToolName"],
+                    "aliases": tool["aliases"],
+                    "tier": tool["tier"],
+                    "annotations": tool["annotations"],
+                    "properties": sorted(tool["inputSchema"].get("properties", {})),
+                    "required": sorted(tool["inputSchema"].get("required", [])),
+                    "outputs": sorted(
+                        tool["outputSchema"]["oneOf"][0]["properties"]["data"]["properties"]
+                    ),
+                }
+            )
+            controls.append(
+                {
+                    "name": tool["nativeToolName"],
+                    "access": tool["access"],
+                    "confirmation": tool["confirmation"],
+                }
+            )
+
+        def projection_hash(value):
+            encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+            return hashlib.sha256(encoded).hexdigest()
+
+        self.assertEqual(
+            projection_hash(compatibility),
+            "be7a0b26064d2a8b9ec167532cb1acce29007fe2d10b6f0ab24aa7f119393924",
+        )
+        self.assertEqual(
+            projection_hash(controls),
+            "48c0cf795764f4e822d8e54616d2aa2d6e1f53873da016073804575b8c8056a5",
         )
 
         required = {
@@ -215,7 +255,7 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["data"]["descriptorsIncluded"])
         self.assertEqual(result["data"]["schemaVersion"], "1.0.0")
         self.assertEqual(result["data"]["serviceId"], "discord")
-        self.assertEqual(result["data"]["counts"]["raw"], 50)
+        self.assertEqual(result["data"]["counts"]["raw"], 52)
         self.assertEqual(result["data"]["tools"], manifest["tools"])
         self.assertEqual(
             result["data"]["descriptorHash"],
@@ -227,21 +267,27 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(result["data"]["nextAction"])
 
-    async def test_find_tools_is_ranked_and_retired_credential_tools_are_absent(self):
+    async def test_find_tools_is_ranked_and_webhook_compatibility_tools_are_hidden(self):
         result = await self.server.find_tools(query="SEND-channel message", limit=8)
 
         self.assertTrue(result["ok"])
         self.assertEqual(result["data"]["matches"][0]["toolName"], "send_message")
         names = set(self.server.mcp._tool_manager._tools)
-        self.assertNotIn("send_webhook_message", names)
-        self.assertNotIn("create_webhook", names)
+        self.assertIn("send_webhook_message", names)
+        self.assertIn("create_webhook", names)
+        manifest_tools = {
+            tool["nativeToolName"]: tool for tool in self.server.current_tool_manifest()["tools"]
+        }
+        self.assertEqual(manifest_tools["create_webhook"]["tier"], "hidden")
+        self.assertEqual(manifest_tools["send_webhook_message"]["tier"], "hidden")
         list_webhooks = next(
             tool
             for tool in self.server.current_tool_manifest()["tools"]
             if tool["nativeToolName"] == "list_webhooks"
         )
-        self.assertEqual(list_webhooks["tier"], "agent_ready")
+        self.assertEqual(list_webhooks["tier"], "hidden")
         self.assertTrue(list_webhooks["annotations"]["readOnlyHint"])
+        self.assertTrue(list_webhooks["confirmation"]["required"])
 
         alias_result = await self.server.find_tools(query="send dm")
         self.assertEqual(alias_result["data"]["matches"][0]["toolName"], "send_private_message")
