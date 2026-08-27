@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   conformance:
-    uses: MADPANDA3D/MADPANDA-MAIN-SITE/.github/workflows/mcp-provider-conformance.yml@main
+    uses: MADPANDA3D/MADPANDA-MAIN-SITE/.github/workflows/mcp-provider-conformance.yml@39393832f82bafe5fc8c2961fb2ee498d238de54
     with:
       service_id: discord
       runtime: python
