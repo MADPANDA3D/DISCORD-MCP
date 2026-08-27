@@ -2,7 +2,7 @@ import importlib
 import os
 import unittest
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import ANY, AsyncMock, patch
 
 
 def import_server():
@@ -162,6 +162,36 @@ class ServerManagementPolicyTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["ok"])
         self.assertEqual(result["error"]["type"], "permission_denied")
         execute.assert_not_awaited()
+
+    async def test_successful_read_records_audit_trail_without_log_failure(self):
+        execute = AsyncMock(
+            return_value={
+                "ok": True,
+                "status": 200,
+                "resource": "guild",
+                "data": {"id": "123456789012345678"},
+                "rate_limit": {"known": True},
+            }
+        )
+        with (
+            patch.object(self.server, "execute_admin_operation", execute),
+            patch.object(self.server, "log_action") as log_action,
+        ):
+            result = await self.server._run_server_management_action(
+                "read",
+                "get_guild",
+            )
+
+        self.assertTrue(result["ok"])
+        audit_trail_id = result["meta"]["audit_trail_id"]
+        log_action.assert_called_once_with(
+            "get_guild",
+            ANY,
+            "ok",
+            guild_id=None,
+            channel_id=None,
+            audit_trail_id=audit_trail_id,
+        )
 
     async def test_modify_member_roles_rejects_protected_payload_role(self):
         user_id = 123456789012345731

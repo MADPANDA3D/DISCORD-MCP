@@ -2188,17 +2188,19 @@ def log_action(
     guild_id: int | None = None,
     channel_id: int | None = None,
     error_type: str | None = None,
+    audit_trail_id: str | None = None,
 ):
     duration_ms = int((time.perf_counter() - start_time) * 1000)
     rate_limit = get_rate_limit_snapshot()
     logger.info(
-        "action=%s status=%s duration_ms=%s guild_id=%s channel_id=%s error_type=%s rate_limit=%s",
+        "action=%s status=%s duration_ms=%s guild_id=%s channel_id=%s error_type=%s audit_trail_id=%s rate_limit=%s",
         action,
         status,
         duration_ms,
         guild_id,
         channel_id,
         error_type,
+        audit_trail_id,
         rate_limit,
     )
 
@@ -4038,7 +4040,7 @@ async def _run_server_management_action(
             "ok",
             guild_id=(guild.id if guild is not None else None),
             channel_id=parsed_channel_id,
-            extra={"audit_trail_id": audit_trail_id},
+            audit_trail_id=audit_trail_id,
         )
         return success_response(
             {
