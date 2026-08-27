@@ -810,6 +810,7 @@ _OPERATIONS = (
         body=("positions",),
         reason=True,
         body_mode="positions",
+        role_guard=True,
     ),
     _operation(
         "modify_role",
