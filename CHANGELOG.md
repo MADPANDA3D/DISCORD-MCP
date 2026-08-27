@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-27
+
+### Fixed
+
+- Fixed successful server-management calls failing during audit logging because the
+  audit trail identifier was passed through an unsupported logger argument.
+
 ## [1.1.0] - 2026-08-27
 
 ### Added
@@ -61,6 +68,7 @@ All notable changes to this project are documented here. The format follows
 - Webhook creation and token-URL execution tools.
 - Unauthenticated and permissive public-mode behavior.
 
+[1.1.1]: https://github.com/MADPANDA3D/DISCORD-MCP/releases/tag/v1.1.1
 [1.1.0]: https://github.com/MADPANDA3D/DISCORD-MCP/releases/tag/v1.1.0
 [1.0.1]: https://github.com/MADPANDA3D/DISCORD-MCP/releases/tag/v1.0.1
 [1.0.0]: https://github.com/MADPANDA3D/DISCORD-MCP/releases/tag/v1.0.0

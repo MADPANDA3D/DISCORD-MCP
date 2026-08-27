@@ -163,9 +163,9 @@ jobs:
           from madpanda_discord_mcp import __version__
           from madpanda_discord_mcp.server import current_tool_manifest, mcp
 
-          assert version('mad-mcp-discord') == '1.1.0'
-          assert __version__ == '1.1.0'
-          assert mcp._mcp_server.version == '1.1.0'
+          assert version('mad-mcp-discord') == '1.1.1'
+          assert __version__ == '1.1.1'
+          assert mcp._mcp_server.version == '1.1.1'
           manifest = current_tool_manifest()
           assert manifest['catalogVersion'] == 'discord-2026.08.27.1'
           assert manifest['counts'] == {
@@ -234,7 +234,7 @@ jobs:
               assert 'MCP_SOURCE_FINGERPRINT' not in service['environment']
               assert service['build']['args']['BUILD_SHA'] == '0000000000000000000000000000000000000001'
               assert service['build']['args']['SOURCE_FINGERPRINT'] == '1' * 64
-              assert service['build']['args']['IMAGE_VERSION'] == '1.1.0'
+              assert service['build']['args']['IMAGE_VERSION'] == '1.1.1'
               ports = service['ports']
               assert len(ports) == 1
               assert ports[0]['host_ip'] == '127.0.0.1'
@@ -248,7 +248,7 @@ jobs:
           docker build \
             --build-arg BUILD_SHA="$GITHUB_SHA" \
             --build-arg SOURCE_FINGERPRINT="$SOURCE_FINGERPRINT" \
-            --build-arg IMAGE_VERSION=1.1.0 \
+            --build-arg IMAGE_VERSION=1.1.1 \
             --tag discord-mcp:ci \
             .
       - name: Scan image with Trivy
