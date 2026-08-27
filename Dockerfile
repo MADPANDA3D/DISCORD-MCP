@@ -27,7 +27,7 @@ FROM python:3.12.13-slim-bookworm@sha256:72d3d75f2639ab82b34b29390ad3d6e0827c775
 
 ARG BUILD_SHA=development
 ARG SOURCE_FINGERPRINT=development
-ARG IMAGE_VERSION=1.0.1
+ARG IMAGE_VERSION=1.1.0
 
 LABEL org.opencontainers.image.title="MADPANDA3D Discord MCP" \
       org.opencontainers.image.description="Dual-mode Discord operations MCP server" \
@@ -63,7 +63,7 @@ ENV PATH="/opt/discord-mcp/bin:${PATH}" \
     MCP_BUILD_SHA="${BUILD_SHA}" \
     MCP_SOURCE_FINGERPRINT="${SOURCE_FINGERPRINT}" \
     MCP_IMAGE_REFERENCE=development \
-    MCP_EXPECTED_TOOL_COUNT=52 \
+    MCP_EXPECTED_TOOL_COUNT=55 \
     MCP_ALLOWED_HOSTS=localhost:*,127.0.0.1:*,[::1]:*,discord-mcp:* \
     MCP_ALLOWED_ORIGINS=""
 

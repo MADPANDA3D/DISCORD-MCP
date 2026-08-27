@@ -6,6 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-27
+
+### Added
+
+- Added three policy-bounded server-management tools backed by an explicit allowlist of 125
+  official stable bot-token actions: 56 read, 22 write, and 47 destructive.
+- Added complete endpoint coverage documentation, action-enum parity tests, permission preflight,
+  effective channel-permission calculation, role hierarchy and protected-target guards, bounded
+  provider results, and credential redaction.
+
+### Changed
+
+- Raised the immutable runtime catalog to `discord-2026.08.27.1` with 55 registered and 49
+  agent-ready tools.
+- Raised the package, server, image, and release version to `1.1.0`.
+
 ## [1.0.1] - 2026-08-19
 
 ### Changed
@@ -45,5 +61,6 @@ All notable changes to this project are documented here. The format follows
 - Webhook creation and token-URL execution tools.
 - Unauthenticated and permissive public-mode behavior.
 
+[1.1.0]: https://github.com/MADPANDA3D/DISCORD-MCP/releases/tag/v1.1.0
 [1.0.1]: https://github.com/MADPANDA3D/DISCORD-MCP/releases/tag/v1.0.1
 [1.0.0]: https://github.com/MADPANDA3D/DISCORD-MCP/releases/tag/v1.0.0

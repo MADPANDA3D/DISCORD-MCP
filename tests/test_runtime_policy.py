@@ -234,6 +234,9 @@ class RuntimePolicyTests(unittest.IsolatedAsyncioTestCase):
 
     def test_manifest_declares_the_exact_admin_inventory(self):
         expected = {
+            "discord_server_read",
+            "discord_server_write",
+            "discord_server_destructive",
             "discord_smoke_test",
             "edit_message",
             "delete_message",

@@ -32,6 +32,10 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
 
 from . import __version__
+from .discord_admin_api import execute_operation as execute_admin_operation
+from .discord_admin_api import get_operation as get_admin_operation
+from .discord_admin_api import validate_payload as validate_admin_payload
+from .discord_admin_api import validate_query as validate_admin_query
 from .runtime_security import (
     AccessControlMiddleware,
     RuntimeConfigurationError,
@@ -420,7 +424,7 @@ def registered_tool_count() -> int:
                 return len(tools)
         except Exception:
             pass
-    return 52
+    return 55
 
 
 def parse_bool(value) -> bool:
@@ -3354,6 +3358,524 @@ async def get_dm_channel(user_id: str, client: commands.Bot | None = None) -> di
     if user is None:
         raise ClientInputError("User not found by userId")
     return await user.create_dm()
+
+
+_ADMIN_PERMISSION_ALIASES = {
+    "manage_guild_expressions": "manage_emojis_and_stickers",
+    "pin_messages": "manage_messages",
+    "set_voice_channel_status": "manage_channels",
+}
+
+
+def _admin_identifiers(values: dict[str, Any]) -> dict[str, str]:
+    names = (
+        "guild_id",
+        "channel_id",
+        "user_id",
+        "role_id",
+        "target_id",
+        "message_id",
+        "emoji",
+        "emoji_id",
+        "webhook_id",
+        "event_id",
+        "rule_id",
+        "sound_id",
+        "sticker_id",
+        "template_code",
+        "invite_code",
+        "integration_id",
+    )
+    return {name: str(values.get(name, "") or "").strip() for name in names}
+
+
+def _admin_required_permissions(operation: Any, payload: Any) -> tuple[str, ...]:
+    if operation.action != "modify_member":
+        return (operation.permission,) if operation.permission else ()
+    fields = set(payload) if isinstance(payload, dict) else set()
+    required: set[str] = set()
+    if fields & {"roles"}:
+        required.add("manage_roles")
+    if fields & {"nick"}:
+        required.add("manage_nicknames")
+    if fields & {"communication_disabled_until"}:
+        required.add("moderate_members")
+    if fields & {"mute", "deaf"}:
+        required.add("mute_members")
+    if fields & {"channel_id"}:
+        required.add("move_members")
+    if fields & {"flags"}:
+        required.add("manage_guild")
+    return tuple(sorted(required))
+
+
+async def _effective_channel_permissions(
+    guild: discord.Guild,
+    channel_id: int,
+    target_id: str,
+    target_type: str,
+) -> dict[str, Any]:
+    channel = guild.get_channel_or_thread(channel_id)
+    if channel is None:
+        channel = await retry_read("fetch_channel", lambda: guild.fetch_channel(channel_id))
+    normalized_type = str(target_type or "bot").strip().lower()
+    target: Any
+    if normalized_type == "bot":
+        target = await get_bot_member(guild)
+        if target is None:
+            raise ValueError("Bot member not available.")
+    elif normalized_type == "member":
+        parsed_target_id = parse_snowflake(target_id)
+        if parsed_target_id is None:
+            raise ValueError("target_id must be a Discord member snowflake.")
+        target = await fetch_member_optional(guild, parsed_target_id)
+        if target is None:
+            raise ValueError("Target member not found in the guild.")
+    elif normalized_type == "role":
+        parsed_target_id = parse_snowflake(target_id)
+        if parsed_target_id is None:
+            raise ValueError("target_id must be a Discord role snowflake.")
+        target = guild.get_role(parsed_target_id)
+        if target is None:
+            raise ValueError("Target role not found in the guild.")
+    else:
+        raise ValueError("query.target_type must be bot, member, or role.")
+
+    effective = channel.permissions_for(target)
+    overwrites = []
+    for overwrite_target, overwrite in channel.overwrites.items():
+        allow, deny = overwrite.pair()
+        overwrites.append(
+            {
+                "target_id": str(overwrite_target.id),
+                "target_type": "role" if isinstance(overwrite_target, discord.Role) else "member",
+                "allow": str(allow.value),
+                "deny": str(deny.value),
+            }
+        )
+    return {
+        "guild_id": str(guild.id),
+        "channel_id": str(channel.id),
+        "target_id": str(target.id),
+        "target_type": normalized_type,
+        "effective_permissions": [name for name, allowed in effective if allowed],
+        "effective_permissions_value": str(effective.value),
+        "permission_overwrites": overwrites,
+    }
+
+
+async def _run_server_management_action(
+    expected_risk: str,
+    action: str,
+    **arguments: Any,
+) -> dict:
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    warnings: list[str] = []
+    audit_trail_id = str(uuid.uuid4())
+    identifiers = _admin_identifiers(arguments)
+    payload = arguments.get("payload")
+    query = arguments.get("query")
+    reason = str(arguments.get("reason", "") or "")
+    confirm = str(arguments.get("confirm", "") or "")
+    parsed_channel_id = parse_snowflake(identifiers.get("channel_id"))
+    try:
+        operation = get_admin_operation(action, expected_risk)
+        query = validate_admin_query(operation, query)
+        payload = validate_admin_payload(operation, payload)
+        if "guild_id" in operation.required_identifiers:
+            identifiers["guild_id"] = str(resolve_guild_id(identifiers["guild_id"]))
+
+        if expected_risk != "read":
+            if not get_active_admin_tools_enabled():
+                return error_with_log(
+                    action,
+                    start_time,
+                    request_id,
+                    build_error(
+                        "permission_denied",
+                        "Discord server-management writes are disabled.",
+                        required_perms=["MCP_ADMIN_TOOLS_ENABLED=true"],
+                    ),
+                    warnings=warnings,
+                    extra={"audit_trail_id": audit_trail_id},
+                )
+            if expected_risk == "destructive" and confirm != "CONFIRM APPLY":
+                return error_with_log(
+                    action,
+                    start_time,
+                    request_id,
+                    build_error(
+                        "confirmation_required",
+                        "Destructive Discord server management requires confirm=CONFIRM APPLY.",
+                    ),
+                    warnings=warnings,
+                    extra={"audit_trail_id": audit_trail_id},
+                )
+            if expected_risk == "write":
+                confirm_error = require_confirm(
+                    confirm,
+                    action,
+                    start_time,
+                    request_id,
+                    warnings=warnings,
+                )
+                if confirm_error:
+                    return confirm_error
+
+        if parsed_channel_id is not None:
+            allowed = (
+                is_read_allowed(parsed_channel_id)
+                if expected_risk == "read"
+                else is_write_allowed(parsed_channel_id)
+            )
+            if not allowed:
+                return error_with_log(
+                    action,
+                    start_time,
+                    request_id,
+                    build_error(
+                        "permission_denied",
+                        "Channel policy blocks this Discord server-management action.",
+                    ),
+                    warnings=warnings,
+                    channel_id=parsed_channel_id,
+                    extra={"audit_trail_id": audit_trail_id},
+                )
+
+        required_permissions = _admin_required_permissions(operation, payload)
+        guild = None
+        if (
+            required_permissions
+            or operation.member_guard
+            or operation.role_guard
+            or operation.action in {"bulk_ban", "get_effective_channel_permissions"}
+        ):
+            guild = await get_guild(identifiers.get("guild_id", ""))
+        if required_permissions and guild is not None:
+            bot_member = await get_bot_member(guild)
+            if bot_member is None:
+                return error_with_log(
+                    action,
+                    start_time,
+                    request_id,
+                    build_error("invalid_payload", "Bot member not available."),
+                    warnings=warnings,
+                    guild_id=guild.id,
+                    extra={"audit_trail_id": audit_trail_id},
+                )
+            permissions = bot_member.guild_permissions
+            channel = guild.get_channel(parsed_channel_id) if parsed_channel_id else None
+            if channel is not None:
+                permissions = channel.permissions_for(bot_member)
+            for permission_name in required_permissions:
+                required_perm = _ADMIN_PERMISSION_ALIASES.get(
+                    permission_name,
+                    permission_name,
+                )
+                if not getattr(permissions, required_perm, False):
+                    return error_with_log(
+                        action,
+                        start_time,
+                        request_id,
+                        build_error(
+                            "permission_denied",
+                            f"Missing permission: {permission_name}.",
+                            required_perms=[permission_name],
+                        ),
+                        warnings=warnings,
+                        guild_id=guild.id,
+                        extra={"audit_trail_id": audit_trail_id},
+                    )
+
+        if operation.member_guard and guild is not None:
+            parsed_user_id = parse_snowflake(identifiers.get("user_id"))
+            if parsed_user_id is None:
+                raise ValueError("user_id must be a Discord snowflake for this action.")
+            member, member_error = await get_member_or_error(
+                guild,
+                parsed_user_id,
+                action,
+                start_time,
+                request_id,
+                warnings,
+                audit_trail_id,
+            )
+            if member_error:
+                return member_error
+            guard_error = ensure_member_guardrails(
+                member,
+                action,
+                start_time,
+                request_id,
+                warnings,
+                audit_trail_id,
+                role_id=parse_snowflake(identifiers.get("role_id")),
+            )
+            if guard_error:
+                return guard_error
+            _, hierarchy_error = await ensure_bot_can_moderate(
+                guild,
+                member,
+                action,
+                start_time,
+                request_id,
+                warnings,
+                audit_trail_id,
+                required_perm=(
+                    _ADMIN_PERMISSION_ALIASES.get(operation.permission, operation.permission)
+                    if operation.permission
+                    else None
+                ),
+            )
+            if hierarchy_error:
+                return hierarchy_error
+
+        if operation.action == "bulk_ban" and guild is not None:
+            raw_user_ids = (payload or {}).get("user_ids") if isinstance(payload, dict) else None
+            if not isinstance(raw_user_ids, list) or not raw_user_ids:
+                raise ValueError("bulk_ban payload.user_ids must contain Discord snowflakes.")
+            for raw_user_id in raw_user_ids:
+                parsed_user_id = parse_snowflake(str(raw_user_id))
+                if parsed_user_id is None:
+                    raise ValueError("bulk_ban payload.user_ids must contain Discord snowflakes.")
+                if parsed_user_id in PROTECTED_USER_IDS or parsed_user_id == guild.owner_id:
+                    return error_with_log(
+                        action,
+                        start_time,
+                        request_id,
+                        build_error(
+                            "permission_denied",
+                            "Bulk ban contains a protected user or the guild owner.",
+                            required_perms=["DISCORD_PROTECTED_USER_IDS"],
+                        ),
+                        warnings=warnings,
+                        guild_id=guild.id,
+                        extra={"audit_trail_id": audit_trail_id},
+                    )
+                member = await fetch_member_optional(guild, parsed_user_id)
+                if member is None:
+                    continue
+                guard_error = ensure_member_guardrails(
+                    member,
+                    action,
+                    start_time,
+                    request_id,
+                    warnings,
+                    audit_trail_id,
+                )
+                if guard_error:
+                    return guard_error
+                _, hierarchy_error = await ensure_bot_can_moderate(
+                    guild,
+                    member,
+                    action,
+                    start_time,
+                    request_id,
+                    warnings,
+                    audit_trail_id,
+                    required_perm="ban_members",
+                )
+                if hierarchy_error:
+                    return hierarchy_error
+
+        if operation.role_guard and guild is not None:
+            guarded_role_id = parse_snowflake(identifiers.get("role_id"))
+            if guarded_role_id is None and str((payload or {}).get("type", "")) == "0":
+                guarded_role_id = parse_snowflake(identifiers.get("target_id"))
+            if guarded_role_id is not None:
+                role = guild.get_role(guarded_role_id)
+                bot_member = await get_bot_member(guild)
+                if guarded_role_id in PROTECTED_ROLE_IDS:
+                    return error_with_log(
+                        action,
+                        start_time,
+                        request_id,
+                        build_error("permission_denied", "Target role is protected."),
+                        warnings=warnings,
+                        guild_id=guild.id,
+                        extra={"audit_trail_id": audit_trail_id},
+                    )
+                if role is not None and bot_member is not None and role >= bot_member.top_role:
+                    return error_with_log(
+                        action,
+                        start_time,
+                        request_id,
+                        build_error(
+                            "permission_denied",
+                            "Bot role hierarchy prevents managing this role.",
+                            required_perms=["role_hierarchy"],
+                        ),
+                        warnings=warnings,
+                        guild_id=guild.id,
+                        extra={"audit_trail_id": audit_trail_id},
+                    )
+
+        if operation.action == "get_effective_channel_permissions":
+            if guild is None or parsed_channel_id is None:
+                raise ValueError("channel_id is required for effective permission lookup.")
+            effective_result = await _effective_channel_permissions(
+                guild,
+                parsed_channel_id,
+                identifiers.get("target_id", ""),
+                str(query.get("target_type", "bot")),
+            )
+            result = {
+                "ok": True,
+                "status": 200,
+                "resource": operation.resource,
+                "data": effective_result,
+                "rate_limit": None,
+            }
+        else:
+            result = await execute_admin_operation(
+                operation,
+                token=get_active_request_token() or DISCORD_TOKEN,
+                identifiers=identifiers,
+                query=query,
+                payload=payload,
+                reason=reason,
+            )
+        meta = build_meta(
+            start_time,
+            request_id=request_id,
+            warnings=warnings,
+            guild_id=(
+                guild.id if guild is not None else parse_snowflake(identifiers.get("guild_id"))
+            ),
+            channel_id=parsed_channel_id,
+            extra={"audit_trail_id": audit_trail_id},
+        )
+        meta["rate_limit"] = result.get("rate_limit", meta.get("rate_limit"))
+        if not result.get("ok"):
+            upstream_error = result.get("error") or {}
+            return error_response(
+                upstream_error.get("type") or "discord_api_error",
+                upstream_error.get("message") or "Discord rejected the server-management request.",
+                meta,
+                discord_code=upstream_error.get("discord_error_code"),
+            )
+        record_api_success(action, result.get("rate_limit"))
+        log_action(
+            action,
+            start_time,
+            "ok",
+            guild_id=(guild.id if guild is not None else None),
+            channel_id=parsed_channel_id,
+            extra={"audit_trail_id": audit_trail_id},
+        )
+        return success_response(
+            {
+                "action": action,
+                "resource": result.get("resource"),
+                "status": result.get("status"),
+                "result": result.get("data"),
+            },
+            meta,
+        )
+    except (TypeError, ValueError) as exc:
+        return error_with_log(
+            action or "discord_server_management",
+            start_time,
+            request_id,
+            build_error("invalid_payload", str(exc)[:512]),
+            warnings=warnings,
+            extra={"audit_trail_id": audit_trail_id},
+        )
+    except Exception as exc:
+        return error_with_log(
+            action or "discord_server_management",
+            start_time,
+            request_id,
+            exception_to_error(exc),
+            warnings=warnings,
+            extra={"audit_trail_id": audit_trail_id},
+        )
+
+
+@mcp.tool()
+async def discord_server_read(
+    action: str,
+    guild_id: str = "",
+    channel_id: str = "",
+    user_id: str = "",
+    role_id: str = "",
+    target_id: str = "",
+    message_id: str = "",
+    emoji: str = "",
+    emoji_id: str = "",
+    webhook_id: str = "",
+    event_id: str = "",
+    rule_id: str = "",
+    sound_id: str = "",
+    sticker_id: str = "",
+    template_code: str = "",
+    invite_code: str = "",
+    integration_id: str = "",
+    query: dict | None = None,
+) -> dict:
+    """Execute one reviewed read-only Discord server-management action."""
+    values = dict(locals())
+    values.pop("action")
+    return await _run_server_management_action("read", action, **values)
+
+
+@mcp.tool()
+async def discord_server_write(
+    action: str,
+    guild_id: str = "",
+    channel_id: str = "",
+    user_id: str = "",
+    role_id: str = "",
+    target_id: str = "",
+    message_id: str = "",
+    emoji: str = "",
+    emoji_id: str = "",
+    webhook_id: str = "",
+    event_id: str = "",
+    rule_id: str = "",
+    sound_id: str = "",
+    sticker_id: str = "",
+    template_code: str = "",
+    invite_code: str = "",
+    integration_id: str = "",
+    payload: dict | None = None,
+    reason: str = "",
+    confirm: str = "",
+) -> dict:
+    """Execute one reviewed additive or reversible Discord administration action."""
+    values = dict(locals())
+    values.pop("action")
+    return await _run_server_management_action("write", action, **values)
+
+
+@mcp.tool()
+async def discord_server_destructive(
+    action: str,
+    guild_id: str = "",
+    channel_id: str = "",
+    user_id: str = "",
+    role_id: str = "",
+    target_id: str = "",
+    message_id: str = "",
+    emoji: str = "",
+    emoji_id: str = "",
+    webhook_id: str = "",
+    event_id: str = "",
+    rule_id: str = "",
+    sound_id: str = "",
+    sticker_id: str = "",
+    template_code: str = "",
+    invite_code: str = "",
+    integration_id: str = "",
+    payload: dict | None = None,
+    reason: str = "",
+    confirm: str = "",
+) -> dict:
+    """Execute one reviewed overwrite, moderation, removal, or delete action."""
+    values = dict(locals())
+    values.pop("action")
+    return await _run_server_management_action("destructive", action, **values)
 
 
 @mcp.tool()

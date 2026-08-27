@@ -1,16 +1,16 @@
 # Tool catalog
 
-Catalog: `discord-2026.08.19.1`
+Catalog: `discord-2026.08.27.1`
 
 | Contract field | Value |
 |---|---:|
-| Registered | 52 |
-| Agent-ready | 46 |
+| Registered | 55 |
+| Agent-ready | 49 |
 | Legacy | 3 |
 | Hidden | 3 |
-| Read | 21 |
-| Write | 15 |
-| Destructive | 16 |
+| Read | 22 |
+| Write | 16 |
+| Destructive | 17 |
 
 Risk is an execution-planning signal, not a substitute for Discord permissions or operator review:
 
@@ -25,6 +25,9 @@ operator aid; Discord remains authoritative for the exact permission calculation
 | Tool | Domain | Risk | Tier | Gate | Typical Discord capability |
 |---|---|---|---|---|---|
 | `get_server_info` | Server | Read | Agent-ready | Standard | Guild membership / View Server |
+| `discord_server_read` | Server management | Read | Agent-ready | Admin | Action-specific guild/channel visibility |
+| `discord_server_write` | Server management | Write | Agent-ready | Admin + confirm | Action-specific Discord permission + local policy |
+| `discord_server_destructive` | Server management | Destructive | Agent-ready | Admin + confirm | Action-specific Discord permission, hierarchy, and local policy |
 | `discord_health_check` | Configuration | Read | Agent-ready | Standard | Guild and sampled channel visibility |
 | `discord_ack` | Messages | Write | Agent-ready | Confirm | Send Messages |
 | `send_message` | Messages | Write | Agent-ready | Confirm | Send Messages; optional Embed Links / Attach Files |
@@ -86,6 +89,11 @@ permission does not bypass server policy.
 
 Role hierarchy, bot ownership rules, channel overwrites, Discord rate limits, and provider-side
 validation can still reject a call that passes MCP policy.
+
+The server-management registry covers 125 reviewed stable REST actions (56 read, 22 write, and 47
+destructive). It is an explicit method/path allowlist, not a generic proxy. Action-specific input
+bounds, safe response projection, protected member and role guards, channel policy, hierarchy
+checks, confirmation, and the admin ceiling all apply before dispatch.
 
 ## Discovery contract
 

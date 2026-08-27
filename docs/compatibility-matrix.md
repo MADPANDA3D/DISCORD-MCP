@@ -2,12 +2,12 @@
 
 This matrix freezes the owner-approved Discord contract reconciled for MAD-728. The preserved
 compatibility projection is SHA-256
-`be7a0b26064d2a8b9ec167532cb1acce29007fe2d10b6f0ab24aa7f119393924`. It covers every native
+`e0015cadb8aaa8b71d70c4ede394deb46526be9d2818b9475aa147490416c496`. It covers every native
 tool name, alias, contract tier, annotation, input property, required input, and declared output
 field. The approved access and confirmation projection is SHA-256
-`48c0cf795764f4e822d8e54616d2aa2d6e1f53873da016073804575b8c8056a5`. CI recomputes both.
+`f7bfd20e6b018428944b6ea371fd7cd574b7b0e51e65e6e13b8a8ad0a9c7ccb8`. CI recomputes both.
 
-All 52 tools retain the normalized `ok/data/meta` or `ok/error/meta` envelope and semantic error
+All 55 tools retain the normalized `ok/data/meta` or `ok/error/meta` envelope and semantic error
 types. Provider calls remain request-scoped, retained jobs and cursors remain tenant-fingerprinted,
 tool output and retained state remain bounded, and the daily-audit/legacy-job helpers continue to
 offload multi-step work without sharing tenant state. Hidden tools are registered for compatibility
@@ -16,6 +16,9 @@ but excluded from agent-ready discovery.
 | Tool | Tier | Risk | Aliases | Required inputs | Declared outputs | Confirm | Reconciliation |
 |---|---|---|---|---|---|---|---|
 | `get_server_info` | agent_ready | read | `server_info`, `guild_info` | — | `id`, `name`, `owner`, `boosts`, `channels`, `created_on`, `member_count` | none | Exact contract |
+| `discord_server_read` | agent_ready | read | `read_server_management`, `effective_permissions`, `list_forum_threads`, `audit_logs` | `action` | `action`, `resource`, `status`, `result` | none | 56 reviewed stable read actions; explicit allowlist and bounded results |
+| `discord_server_write` | agent_ready | write | `create_forum_post`, `create_invite`, `create_automod`, `create_scheduled_event` | `action` | `action`, `resource`, `status`, `result` | required | 22 reviewed stable write actions; explicit allowlist and policy preflight |
+| `discord_server_destructive` | agent_ready | destructive | `edit_server_permissions`, `bulk_server_moderation`, `reorder_server_channels` | `action` | `action`, `resource`, `status`, `result` | required | 47 reviewed stable destructive actions; explicit allowlist, hierarchy, and protected-target guards |
 | `discord_health_check` | agent_ready | read | `health_check`, `check_discord_health` | — | `bot`, `guild`, `status`, `healthy`, `warnings`, `capabilities`, `discord_config`, `last_successful_api_at` | none | Exact contract |
 | `discord_ack` | agent_ready | write | `acknowledge`, `send_ack` | — | `jump_url`, `channel_id`, `message_id` | required | Descriptor corrected to match runtime confirmation gate |
 | `send_message` | agent_ready | write | `post_message`, `discord_send_message` | — | `dry_run`, `jump_url`, `thread_id`, `channel_id`, `message_id`, `attachments`, `diagnostics`, `planned_parts`, `sent_message_ids` | required | Exact contract |
