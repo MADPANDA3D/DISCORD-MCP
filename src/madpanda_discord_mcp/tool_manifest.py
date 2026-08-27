@@ -15,15 +15,20 @@ import re
 from dataclasses import dataclass
 from typing import Any, Mapping
 
+from .discord_admin_api import DESTRUCTIVE_ACTIONS, READ_ACTIONS, WRITE_ACTIONS
+
 SCHEMA_VERSION = "1.0.0"
 SERVICE_ID = "discord"
 SERVICE_ALIASES = ("discord-mcp", "discord_mcp", "discord server")
-CATALOG_VERSION = "discord-2026.08.19.1"
+CATALOG_VERSION = "discord-2026.08.27.1"
 REPOSITORY_DOCS_URL = "https://github.com/MADPANDA3D/DISCORD-MCP/blob/main/docs/tool-catalog.md"
 GUILD_DOCS = "https://docs.discord.com/developers/resources/guild"
 CHANNEL_DOCS = "https://docs.discord.com/developers/resources/channel"
 MESSAGE_DOCS = "https://docs.discord.com/developers/resources/message"
 WEBHOOK_DOCS = "https://docs.discord.com/developers/resources/webhook"
+SERVER_MANAGEMENT_DOCS = (
+    "https://docs.discord.com/developers/platform/server-and-channel-management"
+)
 
 CONTRACT_TIERS = {"agent_ready", "legacy", "hidden"}
 RISK_LEVELS = {"read", "write", "destructive"}
@@ -499,6 +504,58 @@ _DEFINITIONS = (
         docs=GUILD_DOCS,
     ),
     _d(
+        "discord_server_read",
+        "Read Discord Server Management API",
+        "server_management",
+        "an authorized operator needs one officially documented bot-token server administration read for guilds, roles, members, effective channel permissions, invites, forums, threads, messages, pins, AutoMod, audit logs, scheduled events, voice, stages, expressions, soundboards, webhooks, or templates",
+        "executes one immutable allowlisted GET action with typed identifiers and bounded pagination",
+        "the selected action, resource, HTTP status, redacted bounded provider result, rate-limit state, and audit trace",
+        aliases=(
+            "read_server_management",
+            "effective_permissions",
+            "list_forum_threads",
+            "audit_logs",
+        ),
+        read=True,
+        idempotent=True,
+        admin=True,
+        docs=SERVER_MANAGEMENT_DOCS,
+    ),
+    _d(
+        "discord_server_write",
+        "Write Discord Server Management API",
+        "server_management",
+        "an authorized operator needs one additive or reversible official bot-token administration action such as creating a channel, role, invite, forum post, AutoMod rule, scheduled event, stage, expression, sound, safe webhook, or template",
+        "executes one immutable allowlisted write action after provider policy and permission checks",
+        "the selected action, resource, HTTP status, credential-redacted provider result, rate-limit state, and audit trace",
+        aliases=(
+            "create_forum_post",
+            "create_invite",
+            "create_automod",
+            "create_scheduled_event",
+        ),
+        confirm=True,
+        admin=True,
+        docs=SERVER_MANAGEMENT_DOCS,
+    ),
+    _d(
+        "discord_server_destructive",
+        "Change or Delete Discord Server State",
+        "server_management",
+        "an authorized operator needs one official bot-token overwrite, reorder, moderation, permission, bulk-delete, prune, removal, or delete action",
+        "executes one immutable allowlisted destructive action only after exact confirmation, provider policy, role hierarchy, permission, channel, and protected-target checks",
+        "the selected action, resource, HTTP status, credential-redacted provider result, rate-limit state, and audit trace",
+        aliases=(
+            "edit_server_permissions",
+            "bulk_server_moderation",
+            "reorder_server_channels",
+        ),
+        destructive=True,
+        confirm=True,
+        admin=True,
+        docs=SERVER_MANAGEMENT_DOCS,
+    ),
+    _d(
         "send_private_message",
         "Send Discord Direct Message",
         "direct_messages",
@@ -777,6 +834,16 @@ PARAMETER_DESCRIPTIONS = {
     "after_message_id": "Optional Discord message snowflake; return records created after it.",
     "attachment": "Legacy alias for file. Provide one object with base64, url, or path plus optional filename and content_type, or one source string.",
     "attachment_index": "Zero-based decimal index of the image attachment on the message.",
+    "emoji_id": "Discord guild emoji snowflake used by expression-management actions.",
+    "event_id": "Discord guild scheduled-event snowflake.",
+    "integration_id": "Discord guild integration snowflake.",
+    "invite_code": "Discord invite code without a discord.gg URL prefix.",
+    "payload": "Action-specific JSON body for a server-management tool; unknown fields are rejected before Discord is contacted.",
+    "rule_id": "Discord Auto Moderation rule snowflake.",
+    "sound_id": "Discord soundboard sound snowflake.",
+    "sticker_id": "Discord guild sticker snowflake.",
+    "target_id": "Discord role or member snowflake used for a channel permission overwrite.",
+    "template_code": "Discord guild template code.",
     "author_id": "Optional Discord user snowflake used to filter message authors.",
     "auto_archive_duration": "Thread auto-archive duration in minutes: 60, 1440, 4320, or 10080 when supported.",
     "before_message_id": "Optional Discord message snowflake; return records created before it.",
@@ -1021,6 +1088,9 @@ OUTPUT_DATA_FIELDS = {
     "remove_role": ("user_id", "role_id", "role_name", "removed", "reason"),
     "edit_nickname": ("user_id", "nickname", "cleared", "reason"),
     "get_user_id_by_name": ("user_id", "username"),
+    "discord_server_read": ("action", "resource", "status", "result"),
+    "discord_server_write": ("action", "resource", "status", "result"),
+    "discord_server_destructive": ("action", "resource", "status", "result"),
     "send_private_message": ("user_id", "message_id", "jump_url"),
     "edit_private_message": ("user_id", "message_id", "jump_url"),
     "delete_private_message": ("user_id", "message_id"),
@@ -1131,81 +1201,150 @@ _OBJECT_OUTPUT_FIELDS = {
     "job",
     "nextAction",
     "range_utc",
+    "result",
     "results",
     "usage",
 }
 
 ENDPOINT_COVERAGE = (
     {
-        "feature": "guild-metadata",
+        "feature": "guild-settings-and-community",
         "documentationUrl": GUILD_DOCS,
-        "status": "partial",
-        "configuration": ["Discord bot token", "guild ID", "GUILDS intent"],
-        "tools": ["get_server_info", "discord_health_check"],
-        "notes": "Covers guild identity, counts, bot permissions, and readiness; guild-settings mutation is excluded.",
-    },
-    {
-        "feature": "channels-and-categories",
-        "documentationUrl": CHANNEL_DOCS,
-        "status": "partial",
-        "configuration": ["Discord bot token", "guild ID", "channel policy"],
+        "status": "covered",
+        "configuration": ["Discord bot token", "guild ID", "MANAGE_GUILD where required"],
         "tools": [
-            "create_text_channel",
-            "delete_channel",
-            "find_channel",
-            "list_channels",
-            "create_category",
-            "delete_category",
-            "find_category",
-            "list_channels_in_category",
+            "get_server_info",
+            "discord_health_check",
+            "discord_server_read",
+            "discord_server_destructive",
         ],
-        "notes": "Covers text-channel/category inventory and lifecycle; voice, stage, forum, permissions, invites, and positions are not exposed.",
+        "actions": [
+            "get_guild",
+            "get_guild_preview",
+            "get_widget_settings",
+            "get_widget",
+            "get_vanity_url",
+            "get_welcome_screen",
+            "get_onboarding",
+            "modify_guild",
+            "modify_widget",
+            "modify_welcome_screen",
+            "modify_onboarding",
+            "modify_incident_actions",
+        ],
+        "notes": "Stable bot-token guild metadata, settings, widgets, onboarding, welcome-screen, and incident actions are allowlisted. Owner-only MFA transfer and owner transfer remain provider-enforced.",
     },
     {
-        "feature": "messages-and-reactions",
-        "documentationUrl": MESSAGE_DOCS,
-        "status": "partial",
+        "feature": "channels-categories-permissions-and-ordering",
+        "documentationUrl": CHANNEL_DOCS,
+        "status": "covered",
         "configuration": [
             "Discord bot token",
             "guild ID",
-            "MESSAGE_CONTENT intent",
+            "channel policy",
+            "MANAGE_CHANNELS or MANAGE_ROLES where required",
+        ],
+        "tools": [
+            "list_channels",
+            "create_text_channel",
+            "delete_channel",
+            "discord_server_read",
+            "discord_server_write",
+            "discord_server_destructive",
+        ],
+        "actions": [
+            "list_guild_channels",
+            "get_channel",
+            "get_effective_channel_permissions",
+            "create_guild_channel",
+            "modify_channel",
+            "delete_channel",
+            "modify_channel_positions",
+            "edit_channel_permissions",
+            "delete_channel_permission",
+            "set_voice_channel_status",
+        ],
+        "notes": "Covers text, category, announcement, voice, stage, forum, and media channel objects, positions, raw overwrites, effective bot/member/role permissions, and permission preflight.",
+    },
+    {
+        "feature": "messages-reactions-pins-and-bulk-moderation",
+        "documentationUrl": MESSAGE_DOCS,
+        "status": "covered",
+        "configuration": [
+            "Discord bot token",
+            "guild ID",
+            "MESSAGE_CONTENT intent when content is required",
             "channel policy",
         ],
         "tools": [
-            "discord_ack",
             "send_message",
             "edit_message",
             "delete_message",
             "read_messages",
             "search_messages",
-            "analyze_attachment",
             "add_reaction",
             "remove_reaction",
+            "discord_server_read",
+            "discord_server_write",
+            "discord_server_destructive",
         ],
-        "notes": "Covers bot messages, history, filters, attachments, and bot reactions; pins, polls, crossposts, bulk delete, typing, and interactions are not exposed.",
+        "actions": [
+            "get_channel_messages",
+            "search_guild_messages",
+            "get_message",
+            "get_reactions",
+            "get_channel_pins",
+            "crosspost_message",
+            "pin_message",
+            "unpin_message",
+            "delete_all_reactions",
+            "delete_reactions_for_emoji",
+            "bulk_delete_messages",
+            "trigger_typing",
+        ],
+        "notes": "Stable guild message administration includes current paginated pin routes. Poll voting and interaction callbacks are user/application interaction features, not server administration.",
     },
     {
-        "feature": "threads",
+        "feature": "forums-threads-and-membership",
         "documentationUrl": CHANNEL_DOCS,
-        "status": "partial",
-        "configuration": ["Discord bot token", "guild ID", "thread permissions"],
+        "status": "covered",
+        "configuration": ["Discord bot token", "guild ID", "thread and channel permissions"],
         "tools": [
             "list_threads",
             "create_thread",
             "archive_thread",
             "unarchive_thread",
+            "discord_server_read",
+            "discord_server_write",
+            "discord_server_destructive",
         ],
-        "notes": "Covers message-based creation and archive lifecycle; forum posts, membership, and standalone private threads are not exposed.",
+        "actions": [
+            "list_active_threads",
+            "start_thread_from_message",
+            "start_thread_without_message",
+            "start_forum_thread",
+            "join_thread",
+            "add_thread_member",
+            "leave_thread",
+            "remove_thread_member",
+            "get_thread_member",
+            "list_thread_members",
+            "list_public_archived_threads",
+            "list_private_archived_threads",
+            "list_joined_private_archived_threads",
+        ],
+        "notes": "Forum/media post creation and complete stable thread membership and archive inventory are covered.",
     },
     {
-        "feature": "members-roles-and-moderation",
+        "feature": "members-roles-bans-prune-and-voice-state",
         "documentationUrl": GUILD_DOCS,
-        "status": "partial",
+        "status": "covered",
         "configuration": [
             "Discord bot token",
             "guild ID",
-            "GUILD_MEMBERS intent",
+            "GUILD_MEMBERS intent where required",
             "moderation permissions",
+            "protected target policy",
         ],
         "tools": [
             "get_user_id_by_name",
@@ -1217,13 +1356,167 @@ ENDPOINT_COVERAGE = (
             "add_role",
             "remove_role",
             "edit_nickname",
+            "discord_server_read",
+            "discord_server_write",
+            "discord_server_destructive",
         ],
-        "notes": "Covers targeted lookup and guarded moderation; bulk inventory, prune, voice mutation, role lifecycle, and verification are not exposed.",
+        "actions": [
+            "get_member",
+            "list_members",
+            "search_members",
+            "list_bans",
+            "get_ban",
+            "list_roles",
+            "get_role",
+            "get_role_member_counts",
+            "get_prune_count",
+            "list_guild_voice_regions",
+            "get_current_voice_state",
+            "get_user_voice_state",
+            "add_member_role",
+            "create_role",
+            "modify_member",
+            "modify_current_member",
+            "modify_current_nick",
+            "remove_member_role",
+            "bulk_ban",
+            "modify_role_positions",
+            "modify_role",
+            "delete_role",
+            "begin_prune",
+            "modify_current_voice_state",
+            "modify_user_voice_state",
+        ],
+        "notes": "Role lifecycle and ordering, bulk member inventory, protected-target checks, role hierarchy, bulk bans, prune, and guild voice-state management are covered. Add Guild Member is excluded because it requires a user OAuth2 access token with guilds.join, not a bot token alone.",
+    },
+    {
+        "feature": "invites-integrations-and-templates",
+        "documentationUrl": GUILD_DOCS,
+        "status": "covered",
+        "configuration": [
+            "Discord bot token",
+            "guild ID",
+            "invite, channel, integration, and guild permissions",
+        ],
+        "tools": ["discord_server_read", "discord_server_write", "discord_server_destructive"],
+        "actions": [
+            "list_guild_invites",
+            "list_channel_invites",
+            "get_vanity_url",
+            "create_channel_invite",
+            "delete_invite",
+            "list_integrations",
+            "delete_integration",
+            "get_guild_templates",
+            "get_guild_template",
+            "create_guild_template",
+            "sync_guild_template",
+            "modify_guild_template",
+            "delete_guild_template",
+        ],
+        "notes": "Stable bot-token guild invite, integration, and template management is covered. Community invite target-user jobs are campaign analytics rather than server structure and are excluded.",
+    },
+    {
+        "feature": "automod-and-audit-logs",
+        "documentationUrl": "https://docs.discord.com/developers/resources/auto-moderation",
+        "status": "covered",
+        "configuration": ["Discord bot token", "guild ID", "MANAGE_GUILD and VIEW_AUDIT_LOG"],
+        "tools": ["discord_server_read", "discord_server_write", "discord_server_destructive"],
+        "actions": [
+            "list_automod_rules",
+            "get_automod_rule",
+            "create_automod_rule",
+            "modify_automod_rule",
+            "delete_automod_rule",
+            "get_audit_log",
+        ],
+        "notes": "Auto Moderation CRUD and bounded 45-day guild audit-log reads are covered with audit reasons on supported mutations.",
+    },
+    {
+        "feature": "scheduled-events-stage-and-voice",
+        "documentationUrl": "https://docs.discord.com/developers/resources/guild-scheduled-event",
+        "status": "covered",
+        "configuration": [
+            "Discord bot token",
+            "guild ID",
+            "MANAGE_EVENTS and stage/voice permissions",
+        ],
+        "tools": ["discord_server_read", "discord_server_write", "discord_server_destructive"],
+        "actions": [
+            "list_scheduled_events",
+            "get_scheduled_event",
+            "list_scheduled_event_users",
+            "create_scheduled_event",
+            "modify_scheduled_event",
+            "delete_scheduled_event",
+            "get_stage_instance",
+            "create_stage_instance",
+            "modify_stage_instance",
+            "delete_stage_instance",
+            "list_voice_regions",
+            "get_current_voice_state",
+            "get_user_voice_state",
+            "modify_current_voice_state",
+            "modify_user_voice_state",
+        ],
+        "notes": "Stable scheduled-event, stage-instance, voice-region, and guild voice-state endpoints are covered.",
+    },
+    {
+        "feature": "emojis-stickers-and-soundboard",
+        "documentationUrl": "https://docs.discord.com/developers/resources/emoji",
+        "status": "covered",
+        "configuration": [
+            "Discord bot token",
+            "guild ID",
+            "guild expression and soundboard permissions",
+        ],
+        "tools": ["discord_server_read", "discord_server_write", "discord_server_destructive"],
+        "actions": [
+            "list_guild_emojis",
+            "get_guild_emoji",
+            "create_guild_emoji",
+            "modify_guild_emoji",
+            "delete_guild_emoji",
+            "list_guild_stickers",
+            "get_guild_sticker",
+            "create_guild_sticker",
+            "modify_guild_sticker",
+            "delete_guild_sticker",
+            "list_default_soundboard_sounds",
+            "list_guild_soundboard_sounds",
+            "get_guild_soundboard_sound",
+            "send_soundboard_sound",
+            "create_guild_soundboard_sound",
+            "modify_guild_soundboard_sound",
+            "delete_guild_soundboard_sound",
+        ],
+        "notes": "Guild expression CRUD, bounded sticker multipart upload, and soundboard inventory/lifecycle are covered. Application-owned emojis are application configuration rather than guild administration.",
+    },
+    {
+        "feature": "credential-safe-webhook-management",
+        "documentationUrl": WEBHOOK_DOCS,
+        "status": "covered_with_documented_exclusion",
+        "configuration": ["Discord bot token", "guild ID", "MANAGE_WEBHOOKS"],
+        "tools": [
+            "discord_server_read",
+            "discord_server_write",
+            "discord_server_destructive",
+            "send_message",
+        ],
+        "actions": [
+            "list_channel_webhooks",
+            "list_guild_webhooks",
+            "get_webhook",
+            "create_webhook_safe",
+            "modify_webhook_safe",
+            "delete_webhook_safe",
+        ],
+        "notes": "Bot-authorized webhook management is covered and every credential-bearing token or URL is redacted. Webhook-token execution and token-authenticated message routes are excluded because exposing or accepting bearer-like webhook secrets would violate the MCP credential boundary; send_message is the safe delivery path.",
     },
     {
         "feature": "direct-messages",
         "documentationUrl": CHANNEL_DOCS,
-        "status": "partial",
+        "status": "covered_with_documented_exclusion",
         "configuration": ["Discord bot token", "DM enabled policy"],
         "tools": [
             "send_private_message",
@@ -1231,24 +1524,7 @@ ENDPOINT_COVERAGE = (
             "delete_private_message",
             "read_private_messages",
         ],
-        "notes": "Covers one-to-one bot DMs when enabled; group-DM recipient management is excluded.",
-    },
-    {
-        "feature": "webhooks",
-        "documentationUrl": WEBHOOK_DOCS,
-        "status": "partial",
-        "configuration": [
-            "Discord bot token",
-            "guild ID",
-            "MANAGE_WEBHOOKS permission",
-        ],
-        "tools": [
-            "create_webhook",
-            "delete_webhook",
-            "list_webhooks",
-            "send_webhook_message",
-        ],
-        "notes": "The complete legacy webhook contract is preserved as hidden, admin-gated tools. Creation output and listings never expose token-bearing URLs; execution accepts only a separately supplied Discord webhook URL.",
+        "notes": "One-to-one bot DMs are covered when explicitly enabled. Group-DM recipient endpoints require user-account OAuth access and are not bot-token server administration.",
     },
     {
         "feature": "audits-and-jobs",
@@ -1263,23 +1539,15 @@ ENDPOINT_COVERAGE = (
             "discord_job_submit",
             "discord_job_status",
         ],
-        "notes": "Provider orchestration built on message reads; the generic legacy dispatcher is not agent-ready.",
+        "notes": "Provider orchestration built on bounded message reads; the generic legacy dispatcher remains outside agent-ready discovery.",
     },
     {
-        "feature": "oauth-app-commands-and-gateway-management",
+        "feature": "bot-token-technical-exclusions",
         "documentationUrl": "https://docs.discord.com/developers/platform/oauth2-and-permissions",
-        "status": "intentionally_not_exposed",
+        "status": "technically_inapplicable",
         "configuration": [],
         "tools": [],
-        "notes": "The surrounding client or broker owns access; installation, OAuth grants, command registration, and raw gateway lifecycle are outside this contract.",
-    },
-    {
-        "feature": "other-discord-resources",
-        "documentationUrl": "https://docs.discord.com/developers/reference",
-        "status": "intentionally_not_exposed",
-        "configuration": [],
-        "tools": [],
-        "notes": "Invites, emojis, stickers, events, automod, stages, templates, entitlements, SKUs, soundboards, and monetization are not implemented.",
+        "notes": "Excluded after official review: OAuth installation and grants, application commands/interactions, raw Gateway lifecycle, group DMs, Add Guild Member guilds.join, user relationships/connections, Social SDK lobbies, monetization SKUs/entitlements/subscriptions, application-owned emojis, webhook-token routes, and binary widget-image export. These require a user/application/webhook credential, are unrelated to server administration, or cannot be safely represented on this bot-token MCP.",
     },
 )
 
@@ -1359,6 +1627,15 @@ def runtime_registration(tool_name: str) -> dict[str, Any]:
 
 
 def _parameter_description(tool_name: str, parameter_name: str) -> str:
+    if tool_name.startswith("discord_server_"):
+        server_descriptions = {
+            "action": "Exact reviewed operation enum for this read, write, or destructive server-management risk class.",
+            "query": "Action-specific bounded query parameters; unknown keys and limits above the official endpoint maximum are rejected.",
+            "reason": "Optional audit-log reason, at most 512 characters, accepted only when the official endpoint supports it.",
+            "role_id": "Discord guild role snowflake; protected roles and roles at or above the bot are rejected for mutations.",
+        }
+        if parameter_name in server_descriptions:
+            return server_descriptions[parameter_name]
     return PARAMETER_DESCRIPTIONS.get(
         parameter_name,
         f"Input parameter {parameter_name} for {tool_name}; use the documented Discord value format.",
@@ -1387,6 +1664,12 @@ def enrich_input_schema(tool_name: str, input_schema: Mapping[str, Any]) -> dict
                         break
         if parameter_name == "mode":
             parameter_schema["enum"] = ["ocr", "describe"]
+        elif tool_name == "discord_server_read" and parameter_name == "action":
+            parameter_schema["enum"] = list(READ_ACTIONS)
+        elif tool_name == "discord_server_write" and parameter_name == "action":
+            parameter_schema["enum"] = list(WRITE_ACTIONS)
+        elif tool_name == "discord_server_destructive" and parameter_name == "action":
+            parameter_schema["enum"] = list(DESTRUCTIVE_ACTIONS)
         elif tool_name == "discord_job_submit" and parameter_name == "action":
             parameter_schema["enum"] = [
                 "channel_daily_audit",
@@ -1408,6 +1691,8 @@ def enrich_input_schema(tool_name: str, input_schema: Mapping[str, Any]) -> dict
 
 def _output_field_schema(tool_name: str, field_name: str) -> dict[str, Any]:
     description = f"Provider data field {field_name} returned by {tool_name}."
+    if tool_name.startswith("discord_server_") and field_name == "status":
+        return {"type": ["integer", "null"], "description": description}
     if field_name in _BOOLEAN_OUTPUT_FIELDS:
         return {"type": ["boolean", "null"], "description": description}
     if field_name in _INTEGER_OUTPUT_FIELDS:

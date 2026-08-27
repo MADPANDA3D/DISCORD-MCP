@@ -30,18 +30,18 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(manifest["schemaVersion"], "1.0.0")
         self.assertEqual(manifest["serviceId"], "discord")
-        self.assertEqual(manifest["catalogVersion"], "discord-2026.08.19.1")
+        self.assertEqual(manifest["catalogVersion"], "discord-2026.08.27.1")
         self.assertEqual(
             manifest["counts"],
             {
-                "raw": 52,
-                "agentReady": 46,
+                "raw": 55,
+                "agentReady": 49,
                 "legacy": 3,
                 "hidden": 3,
-                "documented": 52,
+                "documented": 55,
             },
         )
-        self.assertEqual(len(self.server.mcp._tool_manager._tools), 52)
+        self.assertEqual(len(self.server.mcp._tool_manager._tools), 55)
         self.assertEqual(
             [tool["nativeToolName"] for tool in manifest["tools"]],
             list(self.manifest_module.TOOL_DEFINITIONS),
@@ -79,11 +79,11 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             projection_hash(compatibility),
-            "be7a0b26064d2a8b9ec167532cb1acce29007fe2d10b6f0ab24aa7f119393924",
+            "e0015cadb8aaa8b71d70c4ede394deb46526be9d2818b9475aa147490416c496",
         )
         self.assertEqual(
             projection_hash(controls),
-            "48c0cf795764f4e822d8e54616d2aa2d6e1f53873da016073804575b8c8056a5",
+            "f7bfd20e6b018428944b6ea371fd7cd574b7b0e51e65e6e13b8a8ad0a9c7ccb8",
         )
 
         required = {
@@ -255,7 +255,7 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["data"]["descriptorsIncluded"])
         self.assertEqual(result["data"]["schemaVersion"], "1.0.0")
         self.assertEqual(result["data"]["serviceId"], "discord")
-        self.assertEqual(result["data"]["counts"]["raw"], 52)
+        self.assertEqual(result["data"]["counts"]["raw"], 55)
         self.assertEqual(result["data"]["tools"], manifest["tools"])
         self.assertEqual(
             result["data"]["descriptorHash"],
@@ -342,10 +342,28 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
         statuses = {item["status"] for item in result["data"]["coverage"]}
 
         self.assertTrue(result["ok"])
-        self.assertIn("partial", statuses)
-        self.assertNotIn("legacy_hidden", statuses)
-        self.assertIn("intentionally_not_exposed", statuses)
+        self.assertIn("covered", statuses)
+        self.assertIn("covered_with_documented_exclusion", statuses)
+        self.assertIn("technically_inapplicable", statuses)
         self.assertGreaterEqual(result["data"]["count"], 10)
+
+    def test_server_management_action_enums_match_the_reviewed_registry(self):
+        manifest = self.server.current_tool_manifest()
+        descriptors = {tool["nativeToolName"]: tool for tool in manifest["tools"]}
+        registry = importlib.import_module("madpanda_discord_mcp.discord_admin_api")
+
+        for tool_name, actions in (
+            ("discord_server_read", registry.READ_ACTIONS),
+            ("discord_server_write", registry.WRITE_ACTIONS),
+            ("discord_server_destructive", registry.DESTRUCTIVE_ACTIONS),
+        ):
+            with self.subTest(tool=tool_name):
+                descriptor = descriptors[tool_name]
+                self.assertTrue(descriptor["access"]["adminRequired"])
+                self.assertEqual(
+                    descriptor["inputSchema"]["properties"]["action"]["enum"],
+                    list(actions),
+                )
 
 
 if __name__ == "__main__":

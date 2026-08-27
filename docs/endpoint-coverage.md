@@ -1,101 +1,76 @@
-# Discord endpoint coverage
+# Discord API endpoint coverage
 
-This document mirrors the runtime coverage contract in catalog
-`discord-2026.08.19.1`. The catalog is intentionally partial: a listed Discord domain does not
-imply complete API coverage.
+Verified against the official Discord developer documentation on 2026-08-27:
 
-| Feature | Status | Exposed tools | Important exclusions |
-|---|---|---:|---|
-| Guild metadata | Partial | 2 | Guild-settings mutation |
-| Channels and categories | Partial | 8 | Voice, stage, forum, overwrites, invites, positions |
-| Messages and reactions | Partial | 9 | Pins, polls, crossposts, bulk delete, typing, interactions |
-| Threads | Partial | 4 | Forum posts, membership, standalone private threads |
-| Members, roles, moderation | Partial | 9 | Bulk inventory, prune, voice mutation, role lifecycle |
-| Direct messages | Partial | 4 | Group-DM recipient management |
-| Webhooks | Partial | 4 | OAuth webhooks and webhook lifecycle beyond create/list/delete/send |
-| Audits and jobs | Provider extension | 6 | Durable distributed job orchestration |
-| OAuth, commands, Gateway management | Not exposed | 0 | Entire surface intentionally excluded |
-| Other Discord resources | Not exposed | 0 | Invites, emojis, stickers, events, automod, stages, commerce |
+- [Server and channel management](https://docs.discord.com/developers/platform/server-and-channel-management)
+- [API reference](https://docs.discord.com/developers/reference)
+- [Guild resource](https://docs.discord.com/developers/resources/guild)
+- [Channel resource](https://docs.discord.com/developers/resources/channel)
+- [Message resource](https://docs.discord.com/developers/resources/message)
+- [Auto Moderation](https://docs.discord.com/developers/resources/auto-moderation)
+- [Audit logs](https://docs.discord.com/developers/resources/audit-log)
+- [Scheduled events](https://docs.discord.com/developers/resources/guild-scheduled-event)
+- [Stage instances](https://docs.discord.com/developers/resources/stage-instance)
+- [Voice](https://docs.discord.com/developers/resources/voice)
+- [Emoji](https://docs.discord.com/developers/resources/emoji)
+- [Sticker](https://docs.discord.com/developers/resources/sticker)
+- [Soundboard](https://docs.discord.com/developers/resources/soundboard)
+- [Webhook resource](https://docs.discord.com/developers/resources/webhook)
+- [OAuth2 and permissions](https://docs.discord.com/developers/platform/oauth2-and-permissions)
 
-## Guild metadata
+## Execution model
 
-Tools: `get_server_info`, `discord_health_check`.
+The existing purpose-built tools remain the preferred interface for routine
+messages, moderation, channel lookup, audits, and one-to-one DMs. Complete
+stable bot-token server-management coverage is provided by three additional
+risk-separated tools:
 
-The server reads guild identity, counts, bot permissions, and provider readiness. It does not mutate
-guild configuration. Typical prerequisites are guild membership and the `GUILDS` intent.
+| Tool | Risk | Contract |
+| --- | --- | --- |
+| `discord_server_read` | read | One immutable `action` enum; bounded query fields, channel policy, permission preflight, one bounded read retry after a provider 429, and credential-redacted results. |
+| `discord_server_write` | write | Additive or reversible actions only; reviewed action-specific JSON fields, admin policy, channel/permission checks, audit-log reasons where supported, and provider confirmation policy. |
+| `discord_server_destructive` | destructive | Overwrites, reorders, moderation, removals, prune, bulk operations, and deletes; always requires `confirm=CONFIRM APPLY`, plus protected-target and role-hierarchy checks where applicable. |
 
-## Channels and categories
+Agents cannot supply arbitrary HTTP methods or paths. `action` is a generated
+enum from the reviewed operation registry. Unknown query or payload fields are
+rejected before Discord is contacted. Lists are capped at 100 items, output is
+bounded below the MCP wire budget, and webhook tokens/URLs are always redacted.
 
-Tools: `create_text_channel`, `delete_channel`, `find_channel`, `list_channels`,
-`create_category`, `delete_category`, `find_category`, `list_channels_in_category`.
+## Stable bot-token server-management inventory
 
-This surface covers text-channel and category inventory plus guarded lifecycle operations. Voice,
-stage, forum, permission-overwrite, invite, and position management remain outside the contract.
+| Resource family | Coverage | Read actions | Write/destructive actions | Notes |
+| --- | --- | --- | --- | --- |
+| Guild settings and community | Covered | `get_guild`, `get_guild_preview`, widget, vanity URL, welcome screen, onboarding | `modify_guild`, widget, welcome screen, onboarding, incident actions | Owner-only fields remain provider-enforced. |
+| Channels, categories, permissions, and ordering | Covered | guild channel inventory, `get_channel`, and `get_effective_channel_permissions` | create/modify/delete channel, channel positions, permission overwrite edit/delete, voice status | Covers text, category, announcement, voice, stage, forum, and media channel objects plus effective bot/member/role permissions and raw overwrites. |
+| Messages, reactions, pins, and bulk moderation | Covered | channel history, guild search, message, reactions, current paginated pins | crosspost, typing, pin/unpin, clear reactions, bulk delete | Dedicated message tools remain preferred for ordinary sends/edits/deletes. |
+| Forums and threads | Covered | active and archived public/private/joined thread inventory and thread members | message thread, standalone thread, forum/media post, join/add/leave/remove member | Fixes TKT-000293: forum/media channels are handled through the official `/channels/{id}/threads` route instead of text-channel history assumptions. |
+| Members, roles, bans, prune, and voice state | Covered | member get/list/search, ban get/list, role list/get/counts, prune count, voice regions/states | role lifecycle/order, member changes, role assignment/removal, bulk ban, prune, voice-state changes | Mutations enforce permission, protected-target, and role-hierarchy checks. |
+| Invites, integrations, widgets, onboarding, templates | Covered | guild/channel invites, integrations, widget, welcome, onboarding, templates | invite creation/delete, integration delete, widget/welcome/onboarding changes, template CRUD/sync | Community invite campaign target-user jobs are outside server structure. |
+| Auto Moderation and audit logs | Covered | rule list/get, bounded guild audit log | rule create/modify/delete | Audit reads require `VIEW_AUDIT_LOG`; mutations carry supported audit reasons. |
+| Scheduled events, stages, and voice | Covered | event/list/users, stage instance, global/guild voice regions and states | event/stage lifecycle and guild voice-state changes | Stable v10 routes only. |
+| Guild emojis, stickers, and soundboard | Covered | guild expression and sound inventory | emoji/sticker/sound lifecycle plus sound playback | Sticker upload is bounded multipart; application-owned emojis are not guild administration. |
+| Credential-safe webhooks | Covered with exclusion | channel/guild list and bot-authorized get | safe create/modify/delete | Tokens and credential-bearing URLs are redacted. Token-authenticated execute/message routes are excluded; use `send_message`. |
+| One-to-one direct messages | Covered with exclusion | `read_private_messages` | send/edit/delete dedicated tools | Group-DM recipient routes require user-account OAuth and are not bot-token server administration. |
 
-## Messages and reactions
+## Exact technical exclusions
 
-Tools: `discord_ack`, `send_message`, `edit_message`, `delete_message`, `read_messages`,
-`search_messages`, `analyze_attachment`, `add_reaction`, `remove_reaction`.
+The following official endpoint families are intentionally not exposed because
+they are not stable bot-token server-management operations:
 
-The server covers bounded message reads, bot-authored writes, filters, one attachment, and bot
-reactions. It does not expose pins, polls, crossposts, bulk delete, typing indicators, or interaction
-responses. Reading message content requires the applicable Discord intent and channel permissions.
+- OAuth installation/grants, application commands/interactions, and raw Gateway
+  lifecycle: Portal or application control-plane responsibilities.
+- `Add Guild Member`: requires a user OAuth2 access token with `guilds.join`, not
+  a bot token alone.
+- Group DMs, user relationships/connections, and Discord Social SDK lobbies:
+  user-account or Social SDK credentials; bot use is technically inapplicable.
+- Monetization SKUs, entitlements, subscriptions, and application-owned emojis:
+  application commerce/configuration rather than guild administration.
+- Webhook-token get/execute/message endpoints: require bearer-like webhook
+  secrets that this MCP must neither accept nor return. Bot-authorized webhook
+  management and `send_message` cover the safe administration path.
+- Binary guild widget image export: public media rendering rather than server
+  configuration; widget settings and JSON are covered.
 
-## Threads
-
-Tools: `list_threads`, `create_thread`, `archive_thread`, `unarchive_thread`.
-
-The implementation covers message-based thread creation and archive lifecycle. Forum posts,
-membership management, and standalone private-thread creation are excluded.
-
-## Members, roles, and moderation
-
-Tools: `get_user_id_by_name`, `timeout_member`, `remove_timeout`, `kick_member`, `ban_member`,
-`unban_member`, `add_role`, `remove_role`, `edit_nickname`.
-
-This is a targeted, confirmation-gated surface. It does not provide bulk member inventory, prune,
-voice-state mutation, role creation/deletion, or verification-level management. Discord role
-hierarchy and protected-user/protected-role policies still apply.
-
-## Direct messages
-
-Tools: `send_private_message`, `edit_private_message`, `delete_private_message`,
-`read_private_messages`.
-
-One-to-one bot DMs are available only when the server enables the DM policy. Group-DM recipient
-management is not implemented.
-
-## Webhooks
-
-Tools: `create_webhook`, `list_webhooks`, `delete_webhook`, `send_webhook_message`.
-
-The complete legacy tool-name and input contract remains registered, with all three legacy webhook
-helpers hidden and admin-gated. Creation preserves its historical result fields while the runtime
-redacts the credential-bearing URL; listing omits URLs; sending accepts only a separately supplied,
-fixed-origin Discord webhook URL and never logs or returns that credential.
-
-## Audits and jobs
-
-Tools: `channel_daily_audit`, `daily_audit_job_submit`, `daily_audit_job_status`,
-`daily_audit_job_next`, `discord_job_submit`, `discord_job_status`.
-
-These are provider extensions built on bounded message reads. The generic `discord_job_*` dispatcher
-is retained as legacy compatibility and is not agent-ready. All job and cursor state is process-local.
-
-## Intentionally unexposed
-
-OAuth installation, application commands, raw Gateway lifecycle, arbitrary REST requests, invites,
-emojis, stickers, scheduled events, automod, stages, templates, entitlements, SKUs, soundboards, and
-monetization are not part of this server.
-
-Authoritative upstream references:
-
-- [Discord guild resource](https://docs.discord.com/developers/resources/guild)
-- [Discord channel resource](https://docs.discord.com/developers/resources/channel)
-- [Discord message resource](https://docs.discord.com/developers/resources/message)
-- [Discord webhook resource](https://docs.discord.com/developers/resources/webhook)
-- [Discord OAuth and permissions](https://docs.discord.com/developers/platform/oauth2-and-permissions)
-
-When this document and runtime behavior differ, `list_capabilities(include_descriptors=true)` and
-`get_endpoint_coverage` are the machine-readable release contract; the discrepancy is a release
-blocker.
+Call `get_endpoint_coverage` for the machine-readable matrix.
+Call `list_capabilities(include_descriptors=true)` for the immutable ordered
+ToolManifest and `get_tool_usage` for a lossless per-tool schema.

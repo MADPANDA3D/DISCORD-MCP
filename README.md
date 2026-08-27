@@ -6,7 +6,7 @@
 
 <p align="center">
   An authenticated, policy-bounded Discord control plane for agents.<br>
-  Fifty deterministic tools. Two service modes. Zero unauthenticated paths to Discord.
+  Fifty-five deterministic tools. Two service modes. Zero unauthenticated paths to Discord.
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 <pre align="center">
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  DISCOVER  ──▶  SCOPE  ──▶  READ  ──▶  CONFIRM  ──▶  MUTATE  ──▶  VERIFY │
-│      52          tenant       safe       exact          policy       typed  │
+│      55          tenant       safe       exact          policy       typed  │
 │     tools         bounds     defaults    phrase         gates        result │
 └────────────────────────────────────────────────────────────────────────────┘
 </pre>
@@ -39,8 +39,9 @@ It is designed around four boundaries:
 - **Typed discovery** keeps the runtime registry, schemas, catalog, and documentation aligned.
 
 This is not an unauthenticated proxy or an arbitrary Discord API client. It does not expose raw
-Gateway access, OAuth installation, application-command management, webhook credentials, or
-complete Discord API coverage. Three legacy webhook tools remain hidden from agent discovery.
+Gateway access, OAuth installation, application-command management, or webhook credentials. Its
+stable server-management REST surface is exposed through an explicit action allowlist; three
+legacy webhook tools remain hidden from agent discovery.
 
 ## Access modes
 
@@ -163,12 +164,12 @@ See [Portal compatibility](docs/portal-compat.md) for the complete broker and ad
 
 ## Tool inventory
 
-The immutable catalog `discord-2026.08.19.1` contains **52 registered tools**:
+The immutable catalog `discord-2026.08.27.1` contains **55 registered tools**:
 
-- **46 agent-ready**
+- **49 agent-ready**
 - **3 legacy compatibility tools**
 - **3 hidden compatibility tools**
-- **21 read, 15 write, 16 destructive**
+- **22 read, 16 write, 17 destructive**
 
 <details>
 <summary><strong>Show all tools by domain</strong></summary>
@@ -176,7 +177,7 @@ The immutable catalog `discord-2026.08.19.1` contains **52 registered tools**:
 | Domain | Tools |
 |---|---|
 | Navigation | `check_configuration`, `list_capabilities`, `get_endpoint_coverage`, `get_tool_usage`, `find_tools` |
-| Server | `get_server_info` |
+| Server | `get_server_info`, `discord_server_read`, `discord_server_write`, `discord_server_destructive` |
 | Configuration | `discord_health_check` |
 | Channels | `create_text_channel`, `delete_channel`, `find_channel`, `list_channels` |
 | Categories | `create_category`, `delete_category`, `find_category`, `list_channels_in_category` |
@@ -192,6 +193,19 @@ The immutable catalog `discord-2026.08.19.1` contains **52 registered tools**:
 | Legacy operations | `discord_smoke_test`, `discord_job_submit`, `discord_job_status` |
 
 </details>
+
+### Complete server management
+
+The three `discord_server_*` tools expose 125 reviewed Discord REST actions through a fixed
+registry: 56 read actions, 22 write actions, and 47 destructive actions. Call
+`discord_server_read` for non-mutating queries, `discord_server_write` for confirmed state
+creation or updates, and `discord_server_destructive` for confirmed deletion, moderation, and
+other high-impact operations. The tools never accept an arbitrary HTTP method or path.
+
+Server-management actions retain the same guild, channel, member, role-hierarchy, protected-ID,
+admin-ceiling, and confirmation boundaries as the typed tools. Responses are size-bounded and
+webhook credentials are redacted. See [Endpoint coverage](docs/endpoint-coverage.md) for the exact
+official endpoint mapping and documented technical exclusions.
 
 Use `find_tools` for intent search, `get_tool_usage` for the exact descriptor, and
 `list_capabilities(include_descriptors=true)` for the lossless catalog. Every descriptor includes
