@@ -158,13 +158,13 @@ curl -i -X POST http://localhost:8085/mcp \
 
 ## Tools
 
-The FastMCP runtime publishes 52 native tools: 46 `agent_ready`, 3 `legacy`, and
+The FastMCP runtime publishes 55 native tools: 49 `agent_ready`, 3 `legacy`, and
 3 `hidden` from default discovery. Every tool is described by the provider-owned,
 deterministically hashed ToolManifest exposed through
 `list_capabilities(include_descriptors=true)`. The manifest includes complete input
 and output schemas, risk annotations, confirmation rules, aliases, tier, catalog
 version, build SHA, and descriptor hashes without runtime credential values.
-The current immutable catalog version is `discord-2026.07.12.3` using shared manifest
+The current immutable catalog version is `discord-2026.08.27.1` using shared manifest
 schema `1.0.0`; every descriptor identifies itself as
 `discord.<nativeToolName>` through `canonicalName`.
 
@@ -179,6 +179,25 @@ intentionally excluded resource areas.
 - `get_endpoint_coverage`: inspect official Discord resource coverage and explicit gaps
 - `get_tool_usage`: return one lossless tool descriptor by native name or alias
 - `find_tools`: punctuation-normalized, multi-token ranked discovery with category/risk filters
+
+</details>
+
+<details>
+<summary>Complete Server Management</summary>
+
+- `discord_server_read`: typed, allowlisted reads for guilds, members, roles,
+  effective channel permissions, invites, forums/threads, pins, AutoMod, audit
+  logs, scheduled events, voice/stage state, expressions, soundboard, webhooks,
+  and templates
+- `discord_server_write`: additive/reversible create and membership actions
+- `discord_server_destructive`: confirm-gated overwrites, ordering, bulk
+  moderation, permission changes, removals, prune, and deletes
+
+These tools do not accept arbitrary methods or paths. Their `action` schemas are
+generated from the reviewed Discord REST v10 registry, request fields are
+allowlisted per action, and webhook credentials are always redacted. See the
+[endpoint inventory](docs/endpoint-coverage.md) for exact coverage and technical
+exclusions.
 
 </details>
 

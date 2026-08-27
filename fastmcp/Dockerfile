@@ -14,6 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt && \
     useradd --system --uid 10001 --gid 10001 --home-dir /nonexistent --no-create-home mcp
 
 COPY discord_mcp_server.py ./
+COPY discord_admin_api.py ./
 COPY tool_manifest.py ./
 
 ENV DISCORD_TOKEN=""
