@@ -14,6 +14,7 @@ DIST = ROOT / "dist"
 PACKAGE_FILES = {
     "__init__.py",
     "__main__.py",
+    "discord_admin_api.py",
     "py.typed",
     "runtime_security.py",
     "server.py",
