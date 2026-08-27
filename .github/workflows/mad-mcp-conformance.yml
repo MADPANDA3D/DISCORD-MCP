@@ -25,15 +25,17 @@ jobs:
       test_command: cd fastmcp && python -m unittest discover -s tests -p 'test_*.py'
       manifest_command: cd fastmcp && python -m unittest discover -s tests -p 'test_tool_manifest.py'
       manifest_paths: |
+        fastmcp/discord_admin_api.py
         fastmcp/tool_manifest.py
+        fastmcp/tests/test_discord_admin_api.py
         fastmcp/tests/test_tool_manifest.py
       compose_file: fastmcp/docker-compose.yaml
       compose_env_example: fastmcp/.env.example
       run_runtime_checks: ${{ inputs.run_runtime_checks || false }}
       runtime_health_url: https://discord-mcp.madpanda3d.com/health
       runtime_mcp_url: https://discord-mcp.madpanda3d.com/mcp
-      expected_raw_tool_count: 52
-      expected_exposed_tool_count: 52
-      expected_agent_ready_tool_count: 46
+      expected_raw_tool_count: 55
+      expected_exposed_tool_count: 55
+      expected_agent_ready_tool_count: 49
     secrets:
       portal_grant_token: ${{ secrets.MAD_MCP_CI_PORTAL_GRANT }}
