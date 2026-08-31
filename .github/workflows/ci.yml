@@ -32,6 +32,7 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" \
             --volume "$PWD:/repo:ro" --workdir /repo \
             "$GITLEAKS_IMAGE" git --config .gitleaks.toml \
+            --log-opts="--full-history HEAD" \
             --redact --verbose --no-banner .
       - name: Validate workflow syntax and semantics
         env:
@@ -167,13 +168,13 @@ jobs:
           assert __version__ == '1.1.1'
           assert mcp._mcp_server.version == '1.1.1'
           manifest = current_tool_manifest()
-          assert manifest['catalogVersion'] == 'discord-2026.08.27.1'
+          assert manifest['catalogVersion'] == 'discord-2026.08.31.2'
           assert manifest['counts'] == {
-              'raw': 55,
-              'agentReady': 49,
+              'raw': 56,
+              'agentReady': 50,
               'legacy': 3,
               'hidden': 3,
-              'documented': 55,
+              'documented': 56,
           }
           assert files('madpanda_discord_mcp').joinpath('py.typed').is_file()
           matches = [

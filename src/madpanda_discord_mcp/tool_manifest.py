@@ -20,7 +20,7 @@ from .discord_admin_api import DESTRUCTIVE_ACTIONS, READ_ACTIONS, WRITE_ACTIONS
 SCHEMA_VERSION = "1.0.0"
 SERVICE_ID = "discord"
 SERVICE_ALIASES = ("discord-mcp", "discord_mcp", "discord server")
-CATALOG_VERSION = "discord-2026.08.27.1"
+CATALOG_VERSION = "discord-2026.08.31.2"
 REPOSITORY_DOCS_URL = "https://github.com/MADPANDA3D/DISCORD-MCP/blob/main/docs/tool-catalog.md"
 GUILD_DOCS = "https://docs.discord.com/developers/resources/guild"
 CHANNEL_DOCS = "https://docs.discord.com/developers/resources/channel"
@@ -272,6 +272,18 @@ _DEFINITIONS = (
         "attachment metadata and extracted or described text",
         aliases=("ocr_attachment", "describe_attachment"),
         avoid="for non-images or when vision is not configured",
+        read=True,
+        idempotent=True,
+        docs=MESSAGE_DOCS,
+    ),
+    _d(
+        "read_attachment",
+        "Read Discord Attachment",
+        "messages",
+        "you need the bytes of one attachment for review, preservation, or re-upload",
+        "downloads a size-bounded attachment and safely inspects text files inside ZIP archives without writing to disk",
+        "safe attachment metadata, base64 content, and bounded archive entries with decoded text",
+        aliases=("download_attachment", "get_attachment"),
         read=True,
         idempotent=True,
         docs=MESSAGE_DOCS,
@@ -833,7 +845,8 @@ PARAMETER_DESCRIPTIONS = {
     "action": "Exact supported native tool name to execute asynchronously.",
     "after_message_id": "Optional Discord message snowflake; return records created after it.",
     "attachment": "Legacy alias for file. Provide one object with base64, url, or path plus optional filename and content_type, or one source string.",
-    "attachment_index": "Zero-based decimal index of the image attachment on the message.",
+    "attachment_index": "Zero-based decimal index of the attachment on the message.",
+    "byte_offset": "Zero-based attachment byte offset returned by next_byte_offset; zero starts a new bounded download.",
     "emoji_id": "Discord guild emoji snowflake used by expression-management actions.",
     "event_id": "Discord guild scheduled-event snowflake.",
     "integration_id": "Discord guild integration snowflake.",
@@ -1017,8 +1030,12 @@ OUTPUT_DATA_FIELDS = {
     "read_messages": (
         "channel_id",
         "count",
+        "requested_count",
+        "fetched_count",
         "before_message_id",
         "after_message_id",
+        "truncated",
+        "next_before_message_id",
         "messages",
     ),
     "search_messages": ("channel_id", "count", "limit", "messages", "filters"),
@@ -1030,6 +1047,19 @@ OUTPUT_DATA_FIELDS = {
         "message_id",
         "channel_id",
         "usage",
+    ),
+    "read_attachment": (
+        "channel_id",
+        "message_id",
+        "attachment_index",
+        "attachment",
+        "content_offset",
+        "content_length",
+        "content_total_bytes",
+        "content_truncated",
+        "next_byte_offset",
+        "content_base64",
+        "archive",
     ),
     "list_threads": ("channel_id", "count", "threads"),
     "create_thread": ("thread_id", "name", "message_id"),
@@ -1147,20 +1177,24 @@ _BOOLEAN_OUTPUT_FIELDS = {
     "ready",
     "removed",
     "timeout_removed",
+    "truncated",
     "unbanned",
 }
 _INTEGER_OUTPUT_FIELDS = {
+    "attachment_index",
     "attachments_count",
     "completed_count",
     "count",
     "delete_message_days",
     "duration_minutes",
     "duration_ms",
+    "fetched_count",
     "limit",
     "member_count",
     "message_count",
     "planned_parts",
     "remaining_count",
+    "requested_count",
     "total_channels",
     "unique_authors",
 }
@@ -1186,6 +1220,7 @@ _ARRAY_OUTPUT_FIELDS = {
     "warnings",
 }
 _OBJECT_OUTPUT_FIELDS = {
+    "archive",
     "attachment",
     "boosts",
     "bot",
@@ -1282,6 +1317,7 @@ ENDPOINT_COVERAGE = (
             "delete_message",
             "read_messages",
             "search_messages",
+            "read_attachment",
             "add_reaction",
             "remove_reaction",
             "discord_server_read",
@@ -1302,7 +1338,7 @@ ENDPOINT_COVERAGE = (
             "bulk_delete_messages",
             "trigger_typing",
         ],
-        "notes": "Stable guild message administration includes current paginated pin routes. Poll voting and interaction callbacks are user/application interaction features, not server administration.",
+        "notes": "Stable guild message administration includes bounded attachment retrieval and current paginated pin routes. Poll voting and interaction callbacks are user/application interaction features, not server administration.",
     },
     {
         "feature": "forums-threads-and-membership",
@@ -1630,7 +1666,7 @@ def _parameter_description(tool_name: str, parameter_name: str) -> str:
     if tool_name.startswith("discord_server_"):
         server_descriptions = {
             "action": "Exact reviewed operation enum for this read, write, or destructive server-management risk class.",
-            "query": "Action-specific bounded query parameters; unknown keys and limits above the official endpoint maximum are rejected.",
+            "query": 'Action-specific JSON object, never a bare string. For search_members use {"query": "trans", "limit": 100}; unknown keys and limits above the official endpoint maximum are rejected.',
             "reason": "Optional audit-log reason, at most 512 characters, accepted only when the official endpoint supports it.",
             "role_id": "Discord guild role snowflake; protected roles and roles at or above the bot are rejected for mutations.",
         }
@@ -1686,6 +1722,30 @@ def enrich_input_schema(tool_name: str, input_schema: Mapping[str, Any]) -> dict
             ]
         elif tool_name == "find_tools" and parameter_name == "risk":
             parameter_schema["enum"] = ["", "read", "write", "destructive"]
+    if tool_name == "discord_server_read":
+        schema.setdefault("allOf", []).append(
+            {
+                "if": {
+                    "properties": {"action": {"const": "search_members"}},
+                    "required": ["action"],
+                },
+                "then": {
+                    "properties": {
+                        "query": {
+                            "type": "object",
+                            "description": "Member-search parameters; query is the required username prefix.",
+                            "properties": {
+                                "query": {"type": "string", "minLength": 1, "maxLength": 100},
+                                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                            },
+                            "required": ["query"],
+                            "additionalProperties": False,
+                        }
+                    },
+                    "required": ["query"],
+                },
+            }
+        )
     return schema
 
 
