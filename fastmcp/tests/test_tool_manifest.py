@@ -28,13 +28,13 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(manifest["schemaVersion"], "1.0.0")
         self.assertEqual(manifest["serviceId"], "discord")
         self.assertEqual(manifest["counts"], {
-            "raw": 52,
-            "agentReady": 46,
+            "raw": 53,
+            "agentReady": 47,
             "legacy": 3,
             "hidden": 3,
-            "documented": 52,
+            "documented": 53,
         })
-        self.assertEqual(len(self.server.mcp._tool_manager._tools), 52)
+        self.assertEqual(len(self.server.mcp._tool_manager._tools), 53)
         self.assertEqual(
             [tool["nativeToolName"] for tool in manifest["tools"]],
             list(self.manifest_module.TOOL_DEFINITIONS),
@@ -189,8 +189,8 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["data"]["descriptorsIncluded"])
         self.assertEqual(result["data"]["schemaVersion"], "1.0.0")
         self.assertEqual(result["data"]["serviceId"], "discord")
-        self.assertEqual(result["data"]["counts"]["raw"], 52)
-        self.assertEqual(len(result["data"]["tools"]), 52)
+        self.assertEqual(result["data"]["counts"]["raw"], 53)
+        self.assertEqual(len(result["data"]["tools"]), 53)
         self.assertEqual(
             result["data"]["descriptorHash"],
             self.server.current_tool_manifest()["descriptorHash"],

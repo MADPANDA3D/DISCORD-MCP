@@ -158,13 +158,13 @@ curl -i -X POST http://localhost:8085/mcp \
 
 ## Tools
 
-The FastMCP runtime publishes 52 native tools: 46 `agent_ready`, 3 `legacy`, and
+The FastMCP runtime publishes 53 native tools: 47 `agent_ready`, 3 `legacy`, and
 3 `hidden` from default discovery. Every tool is described by the provider-owned,
 deterministically hashed ToolManifest exposed through
 `list_capabilities(include_descriptors=true)`. The manifest includes complete input
 and output schemas, risk annotations, confirmation rules, aliases, tier, catalog
 version, build SHA, and descriptor hashes without runtime credential values.
-The current immutable catalog version is `discord-2026.07.12.3` using shared manifest
+The current immutable catalog version is `discord-2026.08.31.1` using shared manifest
 schema `1.0.0`; every descriptor identifies itself as
 `discord.<nativeToolName>` through `canonicalName`.
 
@@ -234,6 +234,7 @@ intentionally excluded resource areas.
 - `read_messages`: read recent history
 - `search_messages`: search with filters
 - `analyze_attachment`: OCR or describe image attachments (OpenAI vision)
+- `read_attachment`: retrieve bounded attachment bytes as base64 and inspect text files in ZIP archives
 - `add_reaction`: add a reaction
 - `remove_reaction`: remove a reaction
 
@@ -244,6 +245,8 @@ intentionally excluded resource areas.
 `send_message` accepts one optional attachment through `file_base64`, `file_url`, `file_path`, or a `file`/`attachment` object with `base64`, `url`, or `path`.
 
 Local `file_path` reads are disabled unless `MCP_ATTACHMENT_ALLOWED_DIRS` is set to a comma-separated allowlist of directories available inside the FastMCP container. Use `file_base64` or `file_url` for hosted clients that cannot mount local files into the service.
+
+Use `read_attachment` with a channel ID, message ID, and zero-based attachment index to retrieve an attachment. Its `content_base64` can be passed directly to `send_message.file_base64` for re-upload. ZIP files are inspected in memory with bounded entry and uncompressed-size limits; recognized text files, including Markdown, are returned in `archive.entries[].text`. CDN URLs are not returned.
 
 <details>
 <summary>Thread Management</summary>

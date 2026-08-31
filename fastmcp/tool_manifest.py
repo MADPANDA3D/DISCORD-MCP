@@ -19,7 +19,7 @@ from typing import Any, Mapping
 SCHEMA_VERSION = "1.0.0"
 SERVICE_ID = "discord"
 SERVICE_ALIASES = ("discord-mcp", "discord_mcp", "discord server")
-CATALOG_VERSION = "discord-2026.07.12.3"
+CATALOG_VERSION = "discord-2026.08.31.1"
 REPOSITORY_DOCS_URL = "https://github.com/MADPANDA3D/DISCORD-MCP#tools"
 GUILD_DOCS = "https://docs.discord.com/developers/resources/guild"
 CHANNEL_DOCS = "https://docs.discord.com/developers/resources/channel"
@@ -127,6 +127,7 @@ _DEFINITIONS = (
     _d("read_messages", "Read Discord Messages", "messages", "you need recent messages from one readable channel", "reads channel history without changing state", "message IDs, authors, timestamps, content, embeds, attachments, reactions, and pagination context", aliases=("list_messages", "get_messages"), read=True, idempotent=True, docs=MESSAGE_DOCS),
     _d("search_messages", "Search Discord Messages", "messages", "you need history filtered by text, author, date, link, file, or thread", "reads matching channel history without changing state", "matching messages, applied filters, counts, and pagination context", aliases=("find_messages", "message_search"), read=True, idempotent=True, docs=MESSAGE_DOCS),
     _d("analyze_attachment", "Analyze Discord Image Attachment", "messages", "you need OCR or visual analysis of an attached image", "reads the attachment and sends it to the configured OpenAI vision endpoint", "attachment metadata and extracted or described text", aliases=("ocr_attachment", "describe_attachment"), avoid="for non-images or when vision is not configured", read=True, idempotent=True, docs=MESSAGE_DOCS),
+    _d("read_attachment", "Read Discord Attachment", "messages", "you need the bytes of one attachment for review, preservation, or re-upload", "downloads a size-bounded attachment and safely inspects text files inside ZIP archives without writing to disk", "safe attachment metadata, base64 content, and bounded archive entries with decoded text", aliases=("download_attachment", "get_attachment"), read=True, idempotent=True, docs=MESSAGE_DOCS),
     _d("list_threads", "List Discord Threads", "threads", "you need active and optionally archived threads under a channel", "reads thread metadata without changing state", "thread IDs, names, archive state, parent channel, and counts", aliases=("get_threads",), read=True, idempotent=True, docs=CHANNEL_DOCS),
     _d("create_thread", "Create Discord Thread", "threads", "you need to start a thread from an existing message", "creates a thread under the specified channel and message", "the new thread ID, name, parent channel, and archive duration", aliases=("start_thread",), confirm=True, docs=CHANNEL_DOCS),
     _d("archive_thread", "Archive Discord Thread", "threads", "you need to close an active thread while preserving history", "changes a thread to archived state", "thread ID, name, and archived state", aliases=("close_thread",), destructive=True, confirm=True, docs=CHANNEL_DOCS),
@@ -302,6 +303,7 @@ OUTPUT_DATA_FIELDS = {
     "read_messages": ("channel_id", "count", "before_message_id", "after_message_id", "messages"),
     "search_messages": ("channel_id", "count", "limit", "messages", "filters"),
     "analyze_attachment": ("mode", "text", "model", "attachment", "message_id", "channel_id", "usage"),
+    "read_attachment": ("channel_id", "message_id", "attachment_index", "attachment", "content_base64", "archive"),
     "list_threads": ("channel_id", "count", "threads"),
     "create_thread": ("thread_id", "name", "message_id"),
     "archive_thread": ("thread_id", "archived"),
@@ -351,7 +353,7 @@ _BOOLEAN_OUTPUT_FIELDS = {
 }
 _INTEGER_OUTPUT_FIELDS = {
     "attachments_count", "completed_count", "count", "delete_message_days",
-    "duration_minutes", "duration_ms", "limit", "member_count", "message_count",
+    "attachment_index", "duration_minutes", "duration_ms", "limit", "member_count", "message_count",
     "planned_parts", "remaining_count", "total_channels", "unique_authors",
 }
 _ARRAY_OUTPUT_FIELDS = {
@@ -361,7 +363,7 @@ _ARRAY_OUTPUT_FIELDS = {
     "warnings",
 }
 _OBJECT_OUTPUT_FIELDS = {
-    "attachment", "boosts", "bot", "capabilities", "channel_result", "configuration",
+    "archive", "attachment", "boosts", "bot", "capabilities", "channel_result", "configuration",
     "counts", "descriptor", "diagnostics", "discord_config", "filters", "guild", "job",
     "nextAction", "range_utc", "results", "usage",
 }
@@ -369,7 +371,7 @@ _OBJECT_OUTPUT_FIELDS = {
 ENDPOINT_COVERAGE = (
     {"feature": "guild-metadata", "documentationUrl": GUILD_DOCS, "status": "partial", "configuration": ["Discord bot token", "guild ID", "GUILDS intent"], "tools": ["get_server_info", "discord_health_check"], "notes": "Covers guild identity, counts, bot permissions, and readiness; guild-settings mutation is excluded."},
     {"feature": "channels-and-categories", "documentationUrl": CHANNEL_DOCS, "status": "partial", "configuration": ["Discord bot token", "guild ID", "channel policy"], "tools": ["create_text_channel", "delete_channel", "find_channel", "list_channels", "create_category", "delete_category", "find_category", "list_channels_in_category"], "notes": "Covers text-channel/category inventory and lifecycle; voice, stage, forum, permissions, invites, and positions are not exposed."},
-    {"feature": "messages-and-reactions", "documentationUrl": MESSAGE_DOCS, "status": "partial", "configuration": ["Discord bot token", "guild ID", "MESSAGE_CONTENT intent", "channel policy"], "tools": ["discord_ack", "send_message", "edit_message", "delete_message", "read_messages", "search_messages", "analyze_attachment", "add_reaction", "remove_reaction"], "notes": "Covers bot messages, history, filters, attachments, and bot reactions; pins, polls, crossposts, bulk delete, typing, and interactions are not exposed."},
+    {"feature": "messages-and-reactions", "documentationUrl": MESSAGE_DOCS, "status": "partial", "configuration": ["Discord bot token", "guild ID", "MESSAGE_CONTENT intent", "channel policy"], "tools": ["discord_ack", "send_message", "edit_message", "delete_message", "read_messages", "search_messages", "read_attachment", "analyze_attachment", "add_reaction", "remove_reaction"], "notes": "Covers bot messages, history, filters, bounded attachment retrieval, and bot reactions; pins, polls, crossposts, bulk delete, typing, and interactions are not exposed."},
     {"feature": "threads", "documentationUrl": CHANNEL_DOCS, "status": "partial", "configuration": ["Discord bot token", "guild ID", "thread permissions"], "tools": ["list_threads", "create_thread", "archive_thread", "unarchive_thread"], "notes": "Covers message-based creation and archive lifecycle; forum posts, membership, and standalone private threads are not exposed."},
     {"feature": "members-roles-and-moderation", "documentationUrl": GUILD_DOCS, "status": "partial", "configuration": ["Discord bot token", "guild ID", "GUILD_MEMBERS intent", "moderation permissions"], "tools": ["get_user_id_by_name", "timeout_member", "remove_timeout", "kick_member", "ban_member", "unban_member", "add_role", "remove_role", "edit_nickname"], "notes": "Covers targeted lookup and guarded moderation; bulk inventory, prune, voice mutation, role lifecycle, and verification are not exposed."},
     {"feature": "direct-messages", "documentationUrl": CHANNEL_DOCS, "status": "partial", "configuration": ["Discord bot token", "DM enabled policy"], "tools": ["send_private_message", "edit_private_message", "delete_private_message", "read_private_messages"], "notes": "Covers one-to-one bot DMs when enabled; group-DM recipient management is excluded."},

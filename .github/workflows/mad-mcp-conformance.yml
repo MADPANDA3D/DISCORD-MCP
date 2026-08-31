@@ -32,8 +32,8 @@ jobs:
       run_runtime_checks: ${{ inputs.run_runtime_checks || false }}
       runtime_health_url: https://discord-mcp.madpanda3d.com/health
       runtime_mcp_url: https://discord-mcp.madpanda3d.com/mcp
-      expected_raw_tool_count: 52
-      expected_exposed_tool_count: 52
-      expected_agent_ready_tool_count: 46
+      expected_raw_tool_count: 53
+      expected_exposed_tool_count: 53
+      expected_agent_ready_tool_count: 47
     secrets:
       portal_grant_token: ${{ secrets.MAD_MCP_CI_PORTAL_GRANT }}

@@ -13,6 +13,7 @@ import re
 import socket
 import time
 import uuid
+import zipfile
 from collections import Counter
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -1114,6 +1115,58 @@ def attachment_metadata(attachment) -> dict:
         "proxy_url": getattr(attachment, "proxy_url", None),
         "width": getattr(attachment, "width", None),
         "height": getattr(attachment, "height", None),
+    }
+
+
+def safe_attachment_metadata(attachment) -> dict:
+    """Return attachment identity without short-lived credential-bearing CDN URLs."""
+    return {
+        "filename": getattr(attachment, "filename", None),
+        "content_type": getattr(attachment, "content_type", None),
+        "size_bytes": getattr(attachment, "size", None),
+        "width": getattr(attachment, "width", None),
+        "height": getattr(attachment, "height", None),
+    }
+
+
+ARCHIVE_TEXT_SUFFIXES = {
+    ".md", ".markdown", ".txt", ".json", ".yaml", ".yml", ".toml",
+    ".csv", ".xml", ".html", ".css", ".js", ".ts", ".py", ".java",
+}
+MAX_ARCHIVE_FILES = 100
+
+
+def inspect_zip_attachment(data: bytes) -> dict | None:
+    """List a ZIP and decode bounded text entries without writing to disk."""
+    if not zipfile.is_zipfile(io.BytesIO(data)):
+        return None
+    entries = []
+    total_uncompressed = 0
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        infos = archive.infolist()
+        if len(infos) > MAX_ARCHIVE_FILES:
+            raise ValueError(f"ZIP archive exceeds {MAX_ARCHIVE_FILES} entries.")
+        for info in infos:
+            total_uncompressed += info.file_size
+            if total_uncompressed > DISCORD_ATTACHMENT_MAX_BYTES:
+                raise ValueError(
+                    f"ZIP uncompressed content exceeds DISCORD_ATTACHMENT_MAX_MB ({DISCORD_ATTACHMENT_MAX_MB} MB)."
+                )
+            entry = {
+                "name": info.filename,
+                "size_bytes": info.file_size,
+                "is_directory": info.is_dir(),
+            }
+            suffix = Path(info.filename).suffix.lower()
+            if not info.is_dir() and suffix in ARCHIVE_TEXT_SUFFIXES:
+                raw = archive.read(info)
+                entry["text"] = raw.decode("utf-8", errors="replace")
+            entries.append(entry)
+    return {
+        "format": "zip",
+        "entry_count": len(entries),
+        "total_uncompressed_bytes": total_uncompressed,
+        "entries": entries,
     }
 
 
@@ -4372,6 +4425,98 @@ async def analyze_attachment(
             error,
             warnings=warnings,
             channel_id=resolved_channel_id,
+        )
+
+
+@mcp.tool()
+async def read_attachment(
+    channel_id: str = "",
+    message_id: str = "",
+    attachment_index: str = "0",
+) -> dict:
+    """Download one Discord attachment and inspect bounded ZIP text entries."""
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    warnings = []
+    resolved_channel_id = None
+    try:
+        resolved_channel_id = resolve_channel_id(channel_id)
+        channel = await get_message_target(resolved_channel_id)
+        read_channel_id = (
+            channel.parent_id
+            if isinstance(channel, discord.Thread) and channel.parent_id
+            else channel.id
+        )
+        allow_error = require_read_allowed(
+            read_channel_id,
+            "read_attachment",
+            start_time,
+            request_id,
+            warnings=warnings,
+        )
+        if allow_error:
+            return allow_error
+
+        parsed_message_id = parse_snowflake(message_id)
+        if parsed_message_id is None:
+            error = build_error("invalid_payload", "message_id must be a Discord snowflake.")
+            return error_with_log(
+                "read_attachment", start_time, request_id, error,
+                warnings=warnings, channel_id=resolved_channel_id,
+            )
+        msg = await retry_read(
+            "fetch_message", lambda: channel.fetch_message(int(parsed_message_id))
+        )
+        attachments = list(msg.attachments or [])
+        if not attachments:
+            error = build_error("invalid_payload", "Message has no attachments.")
+            return error_with_log(
+                "read_attachment", start_time, request_id, error,
+                warnings=warnings, channel_id=resolved_channel_id,
+            )
+        index_value = parse_int(attachment_index, 0)
+        if index_value is None or index_value < 0 or index_value >= len(attachments):
+            error = build_error(
+                "invalid_payload", "attachment_index is out of range.",
+                diagnostics={"attachments_count": len(attachments)},
+            )
+            return error_with_log(
+                "read_attachment", start_time, request_id, error,
+                warnings=warnings, channel_id=resolved_channel_id,
+            )
+
+        attachment = attachments[index_value]
+        declared_size = getattr(attachment, "size", None)
+        if declared_size is not None:
+            check_attachment_size(int(declared_size))
+        content = await retry_read("read_attachment_bytes", attachment.read)
+        check_attachment_size(len(content))
+        archive = inspect_zip_attachment(content)
+        record_api_success("read_attachment")
+        log_action(
+            "read_attachment", start_time, "ok",
+            guild_id=channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID,
+            channel_id=resolved_channel_id,
+        )
+        meta = build_meta(
+            start_time, request_id=request_id, warnings=warnings,
+            guild_id=channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID,
+            channel_id=resolved_channel_id,
+        )
+        data = {
+            "channel_id": str(channel.id),
+            "message_id": str(msg.id),
+            "attachment_index": index_value,
+            "attachment": safe_attachment_metadata(attachment),
+            "content_base64": base64.b64encode(content).decode("ascii"),
+            "archive": archive,
+        }
+        return success_response(data, meta)
+    except Exception as exc:
+        error = exception_to_error(exc)
+        return error_with_log(
+            "read_attachment", start_time, request_id, error,
+            warnings=warnings, channel_id=resolved_channel_id,
         )
 
 
