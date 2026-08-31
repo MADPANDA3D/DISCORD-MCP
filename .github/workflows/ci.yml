@@ -32,6 +32,7 @@ jobs:
           docker run --rm --user "$(id -u):$(id -g)" \
             --volume "$PWD:/repo:ro" --workdir /repo \
             "$GITLEAKS_IMAGE" git --config .gitleaks.toml \
+            --log-opts="--full-history HEAD" \
             --redact --verbose --no-banner .
       - name: Validate workflow syntax and semantics
         env:
