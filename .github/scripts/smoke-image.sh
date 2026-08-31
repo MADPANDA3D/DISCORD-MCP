@@ -65,10 +65,10 @@ for profile in portal standalone-server standalone-request; do
     -e "MCP_BUILD_SHA=$build_sha" \
     -e "MCP_SOURCE_FINGERPRINT=$source_fingerprint" \
     -e "MCP_IMAGE_REFERENCE=$image_reference" \
-    -e MCP_EXPECTED_TOOL_COUNT=55 \
-    -e MCP_EXPECTED_AGENT_READY_COUNT=49 \
+    -e MCP_EXPECTED_TOOL_COUNT=56 \
+    -e MCP_EXPECTED_AGENT_READY_COUNT=50 \
     -e MCP_EXPECTED_HIDDEN_COUNT=3 \
-    -e MCP_EXPECTED_CATALOG_VERSION=discord-2026.08.27.1 \
+    -e MCP_EXPECTED_CATALOG_VERSION=discord-2026.08.31.2 \
     -e MCP_ALLOWED_HOSTS=127.0.0.1:*,localhost:* \
     "$image" >/dev/null
 
