@@ -6,7 +6,7 @@
 
 <p align="center">
   An authenticated, policy-bounded Discord control plane for agents.<br>
-  Fifty-five deterministic tools. Two service modes. Zero unauthenticated paths to Discord.
+  Fifty-six deterministic tools. Two service modes. Zero unauthenticated paths to Discord.
 </p>
 
 <p align="center">
@@ -20,7 +20,7 @@
 <pre align="center">
 ┌────────────────────────────────────────────────────────────────────────────┐
 │  DISCOVER  ──▶  SCOPE  ──▶  READ  ──▶  CONFIRM  ──▶  MUTATE  ──▶  VERIFY │
-│      55          tenant       safe       exact          policy       typed  │
+│      56          tenant       safe       exact          policy       typed  │
 │     tools         bounds     defaults    phrase         gates        result │
 └────────────────────────────────────────────────────────────────────────────┘
 </pre>
@@ -164,12 +164,12 @@ See [Portal compatibility](docs/portal-compat.md) for the complete broker and ad
 
 ## Tool inventory
 
-The immutable catalog `discord-2026.08.27.1` contains **55 registered tools**:
+The immutable catalog `discord-2026.08.31.2` contains **56 registered tools**:
 
-- **49 agent-ready**
+- **50 agent-ready**
 - **3 legacy compatibility tools**
 - **3 hidden compatibility tools**
-- **22 read, 16 write, 17 destructive**
+- **23 read, 16 write, 17 destructive**
 
 <details>
 <summary><strong>Show all tools by domain</strong></summary>
@@ -181,7 +181,7 @@ The immutable catalog `discord-2026.08.27.1` contains **55 registered tools**:
 | Configuration | `discord_health_check` |
 | Channels | `create_text_channel`, `delete_channel`, `find_channel`, `list_channels` |
 | Categories | `create_category`, `delete_category`, `find_category`, `list_channels_in_category` |
-| Messages | `discord_ack`, `send_message`, `edit_message`, `delete_message`, `read_messages`, `search_messages`, `analyze_attachment` |
+| Messages | `discord_ack`, `send_message`, `edit_message`, `delete_message`, `read_messages`, `search_messages`, `read_attachment`, `analyze_attachment` |
 | Threads | `list_threads`, `create_thread`, `archive_thread`, `unarchive_thread` |
 | Reactions | `add_reaction`, `remove_reaction` |
 | Members | `edit_nickname`, `get_user_id_by_name` |
@@ -243,6 +243,10 @@ Attachment URLs must be HTTPS on port 443 with no credentials, fragments, redire
 or private DNS answers. Connections use pinned public DNS results, ignore environment proxies, and
 enforce time and size ceilings. Server-local paths are permitted only in standalone/server mode and
 only beneath `MCP_ATTACHMENT_ALLOWED_DIRS`.
+
+`read_attachment` returns bounded base64 bytes without exposing short-lived Discord CDN URLs and
+can inspect bounded text entries inside ZIP files without extracting them to disk. `read_messages`
+returns a wire-safe page plus `next_before_message_id` when more records require continuation.
 
 `analyze_attachment` is disabled until `OPENAI_VISION_ENABLED=true`. When enabled, the selected
 Discord image and prompt cross a separate OpenAI data-transfer and cost boundary. The configured

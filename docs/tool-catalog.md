@@ -1,14 +1,14 @@
 # Tool catalog
 
-Catalog: `discord-2026.08.27.1`
+Catalog: `discord-2026.08.31.2`
 
 | Contract field | Value |
 |---|---:|
-| Registered | 55 |
-| Agent-ready | 49 |
+| Registered | 56 |
+| Agent-ready | 50 |
 | Legacy | 3 |
 | Hidden | 3 |
-| Read | 22 |
+| Read | 23 |
 | Write | 16 |
 | Destructive | 17 |
 
@@ -39,6 +39,7 @@ operator aid; Discord remains authoritative for the exact permission calculation
 | `read_messages` | Messages | Read | Agent-ready | Standard | View Channel + Read Message History |
 | `search_messages` | Messages | Read | Agent-ready | Standard | View Channel + Read Message History |
 | `analyze_attachment` | Messages | Read | Agent-ready | Vision opt-in | Read history + attachment access + OpenAI boundary |
+| `read_attachment` | Messages | Read | Agent-ready | Standard | Read history + bounded attachment access |
 | `list_threads` | Threads | Read | Agent-ready | Standard | View Channel + thread visibility |
 | `create_thread` | Threads | Write | Agent-ready | Confirm | Create Public Threads / Send Messages in Threads |
 | `archive_thread` | Threads | Destructive | Agent-ready | Confirm | Manage Threads or thread ownership |

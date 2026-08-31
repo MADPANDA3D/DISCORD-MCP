@@ -14,6 +14,7 @@ import re
 import socket
 import time
 import uuid
+import zipfile
 from collections import Counter
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -424,7 +425,7 @@ def registered_tool_count() -> int:
                 return len(tools)
         except Exception:
             pass
-    return 55
+    return 56
 
 
 def parse_bool(value) -> bool:
@@ -1436,6 +1437,90 @@ def serialize_embeds(embeds: list[discord.Embed] | None) -> list[dict]:
     return payload
 
 
+def _bounded_message_text(value: Any, limit: int) -> tuple[str, bool]:
+    text = str(value or "")
+    if len(text) <= limit:
+        return text, False
+    return text[:limit], True
+
+
+def serialize_message_for_read(message) -> dict:
+    """Return a useful message record that stays safe for paginated MCP output."""
+
+    truncated_fields = []
+    content, content_truncated = _bounded_message_text(message.content, 768)
+    embed_text, embed_text_truncated = _bounded_message_text(
+        extract_embed_text(message.embeds), 768
+    )
+    combined, combined_truncated = _bounded_message_text(get_message_text(message), 1_024)
+    if content_truncated:
+        truncated_fields.append("content")
+    if embed_text_truncated:
+        truncated_fields.append("embed_text")
+    if combined_truncated:
+        truncated_fields.append("content_with_embeds")
+
+    embeds = []
+    source_embeds = list(message.embeds or [])
+    for embed in source_embeds[:1]:
+        title, title_truncated = _bounded_message_text(getattr(embed, "title", None), 128)
+        description, description_truncated = _bounded_message_text(
+            getattr(embed, "description", None), 256
+        )
+        fields = []
+        source_fields = list(getattr(embed, "fields", None) or [])
+        for field in source_fields[:2]:
+            field_name, field_name_truncated = _bounded_message_text(
+                getattr(field, "name", None), 64
+            )
+            field_value, field_value_truncated = _bounded_message_text(
+                getattr(field, "value", None), 128
+            )
+            fields.append(
+                {
+                    "name": field_name or None,
+                    "value": field_value or None,
+                    "inline": bool(getattr(field, "inline", False)),
+                }
+            )
+            if field_name_truncated or field_value_truncated:
+                truncated_fields.append("embeds.fields")
+        embeds.append(
+            {
+                "title": title or None,
+                "description": description or None,
+                "url": getattr(embed, "url", None),
+                "fields": fields,
+                "truncated": bool(
+                    title_truncated
+                    or description_truncated
+                    or len(source_fields) > len(fields)
+                ),
+            }
+        )
+    if len(source_embeds) > len(embeds):
+        truncated_fields.append("embeds")
+
+    return {
+        "id": str(message.id),
+        "author": {
+            "id": str(message.author.id),
+            "name": message.author.name,
+        },
+        "created_at": message.created_at.isoformat(),
+        "content": content,
+        "embed_text": embed_text,
+        "content_with_embeds": combined,
+        "embeds": embeds,
+        "jump_url": message.jump_url,
+        "attachments_count": len(message.attachments),
+        "has_attachments": bool(message.attachments),
+        "has_links": bool(LINK_RE.search(get_message_text(message))),
+        "has_embeds": bool(message.embeds),
+        "truncated_fields": sorted(set(truncated_fields)),
+    }
+
+
 def extract_embed_text(embeds: list[discord.Embed] | None) -> str:
     if not embeds:
         return ""
@@ -1493,6 +1578,60 @@ def attachment_metadata(attachment) -> dict:
         "size_bytes": getattr(attachment, "size", None),
         "width": getattr(attachment, "width", None),
         "height": getattr(attachment, "height", None),
+    }
+
+
+ARCHIVE_TEXT_SUFFIXES = {
+    ".css",
+    ".csv",
+    ".html",
+    ".java",
+    ".js",
+    ".json",
+    ".markdown",
+    ".md",
+    ".py",
+    ".toml",
+    ".ts",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+MAX_ARCHIVE_FILES = 100
+
+
+def inspect_zip_attachment(data: bytes) -> dict | None:
+    """List a ZIP and decode bounded text entries without writing to disk."""
+
+    if not zipfile.is_zipfile(io.BytesIO(data)):
+        return None
+    entries = []
+    total_uncompressed = 0
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        infos = archive.infolist()
+        if len(infos) > MAX_ARCHIVE_FILES:
+            raise ClientInputError(f"ZIP archive exceeds {MAX_ARCHIVE_FILES} entries.")
+        for info in infos:
+            total_uncompressed += info.file_size
+            if total_uncompressed > DISCORD_ATTACHMENT_MAX_BYTES:
+                raise ClientInputError(
+                    "ZIP uncompressed content exceeds "
+                    f"DISCORD_ATTACHMENT_MAX_MB ({DISCORD_ATTACHMENT_MAX_MB} MB)."
+                )
+            entry = {
+                "name": info.filename,
+                "size_bytes": info.file_size,
+                "is_directory": info.is_dir(),
+            }
+            if not info.is_dir() and Path(info.filename).suffix.lower() in ARCHIVE_TEXT_SUFFIXES:
+                entry["text"] = archive.read(info).decode("utf-8", errors="replace")
+            entries.append(entry)
+    return {
+        "format": "zip",
+        "entry_count": len(entries),
+        "total_uncompressed_bytes": total_uncompressed,
+        "entries": entries,
     }
 
 
@@ -2949,6 +3088,7 @@ def channel_capabilities(perms: discord.Permissions) -> dict:
         "view": perms.view_channel,
         "read_history": perms.read_message_history,
         "send": perms.send_messages,
+        "send_in_threads": perms.send_messages_in_threads,
         "embed_links": perms.embed_links,
         "attach_files": perms.attach_files,
         "add_reactions": perms.add_reactions,
@@ -4533,22 +4673,6 @@ async def send_message(
                 channel_id=resolved_channel_id,
             )
 
-        diagnostics = {
-            "resolved_channel_id": str(resolved_channel_id),
-            "allowed_channel": is_write_allowed(resolved_channel_id),
-            "attachments_count": 1 if has_attachment else 0,
-        }
-        allow_error = require_write_allowed(
-            resolved_channel_id,
-            "send_message",
-            start_time,
-            request_id,
-            warnings=warnings,
-            diagnostics=diagnostics,
-        )
-        if allow_error:
-            return allow_error
-
         thread_if_split = parse_bool(thread_if_split)
         thread_name = (thread_name or "").strip()
         has_embed = bool(embed_title or embed_description or embed_color)
@@ -4556,7 +4680,7 @@ async def send_message(
         perms = None
         caps = None
         try:
-            channel = await get_text_channel(resolved_channel_id)
+            channel = await get_message_target(resolved_channel_id)
             member = await get_bot_member(channel.guild)
             perms = (
                 channel.permissions_for(member)
@@ -4573,11 +4697,47 @@ async def send_message(
             else:
                 raise
 
-        if perms is not None and not perms.send_messages:
+        write_channel_id = (
+            channel.parent_id
+            if isinstance(channel, discord.Thread) and channel.parent_id
+            else resolved_channel_id
+        )
+        diagnostics.update(
+            {
+                "resolved_channel_id": str(resolved_channel_id),
+                "policy_channel_id": str(write_channel_id),
+                "allowed_channel": is_write_allowed(write_channel_id),
+                "attachments_count": 1 if has_attachment else 0,
+            }
+        )
+        allow_error = require_write_allowed(
+            write_channel_id,
+            "send_message",
+            start_time,
+            request_id,
+            warnings=warnings,
+            diagnostics=diagnostics,
+        )
+        if allow_error:
+            return allow_error
+
+        send_permission = (
+            perms.send_messages_in_threads
+            if perms is not None and isinstance(channel, discord.Thread)
+            else perms.send_messages
+            if perms is not None
+            else True
+        )
+        if not send_permission:
+            required_send_permission = (
+                "send_messages_in_threads"
+                if isinstance(channel, discord.Thread)
+                else "send_messages"
+            )
             error = build_error(
                 "permission_denied",
                 "Missing permission to send messages.",
-                required_perms=["send_messages"],
+                required_perms=[required_send_permission],
                 diagnostics=diagnostics,
             )
             return error_with_log(
@@ -4707,7 +4867,9 @@ async def send_message(
                 }
             )
 
-        can_create_threads = bool(caps and caps.get("create_threads"))
+        can_create_threads = bool(
+            caps and caps.get("create_threads") and not isinstance(channel, discord.Thread)
+        )
         thread_planned = thread_if_split and will_split and can_create_threads
         if thread_if_split and will_split and not can_create_threads:
             warnings.append(
@@ -5559,26 +5721,19 @@ async def read_messages(
 
         messages = await retry_read("read_messages", fetch_history)
         record_api_success("read_messages")
-        payload = [
-            {
-                "id": str(msg.id),
-                "author": {
-                    "id": str(msg.author.id),
-                    "name": msg.author.name,
-                },
-                "created_at": msg.created_at.isoformat(),
-                "content": msg.content,
-                "embed_text": extract_embed_text(msg.embeds),
-                "content_with_embeds": get_message_text(msg),
-                "embeds": serialize_embeds(msg.embeds),
-                "jump_url": msg.jump_url,
-                "attachments_count": len(msg.attachments),
-                "has_attachments": bool(msg.attachments),
-                "has_links": bool(LINK_RE.search(get_message_text(msg))),
-                "has_embeds": bool(msg.embeds),
-            }
-            for msg in messages
-        ]
+        payload = []
+        payload_budget = max(4_096, MCP_TOOL_OUTPUT_MAX_BYTES - 8_192)
+        for message in messages:
+            candidate = payload + [serialize_message_for_read(message)]
+            if serialized_tool_result_size(candidate) > payload_budget:
+                break
+            payload = candidate
+        output_truncated = len(payload) < len(messages)
+        if output_truncated:
+            warnings.append(
+                "Message records were bounded to the MCP output ceiling; continue with "
+                "next_before_message_id."
+            )
         log_action(
             "read_messages",
             start_time,
@@ -5595,9 +5750,13 @@ async def read_messages(
         )
         data = {
             "channel_id": str(channel.id),
-            "count": len(messages),
+            "count": len(payload),
+            "requested_count": limit,
+            "fetched_count": len(messages),
             "before_message_id": str(before_id) if before_id else None,
             "after_message_id": str(after_id) if after_id else None,
+            "truncated": output_truncated,
+            "next_before_message_id": payload[-1]["id"] if payload else None,
             "messages": payload,
         }
         return success_response(data, meta)
@@ -6139,6 +6298,97 @@ async def analyze_attachment(
             start_time,
             request_id,
             error,
+            warnings=warnings,
+            channel_id=resolved_channel_id,
+        )
+
+
+@mcp.tool()
+async def read_attachment(
+    channel_id: str = "",
+    message_id: str = "",
+    attachment_index: str = "0",
+) -> dict:
+    """Download one Discord attachment and inspect bounded ZIP text entries."""
+
+    start_time = time.perf_counter()
+    request_id = str(uuid.uuid4())
+    warnings = []
+    resolved_channel_id = None
+    try:
+        resolved_channel_id = resolve_channel_id(channel_id)
+        channel = await get_message_target(resolved_channel_id)
+        read_channel_id = (
+            channel.parent_id
+            if isinstance(channel, discord.Thread) and channel.parent_id
+            else channel.id
+        )
+        allow_error = require_read_allowed(
+            read_channel_id,
+            "read_attachment",
+            start_time,
+            request_id,
+            warnings=warnings,
+        )
+        if allow_error:
+            return allow_error
+
+        parsed_message_id = parse_snowflake(message_id)
+        if parsed_message_id is None:
+            raise ClientInputError("message_id must be a Discord snowflake.")
+        message = await retry_read(
+            "fetch_message", lambda: channel.fetch_message(int(parsed_message_id))
+        )
+        attachments = list(message.attachments or [])
+        if not attachments:
+            raise ClientInputError("Message has no attachments.")
+        index_value = parse_int(attachment_index, 0)
+        if index_value is None or index_value < 0 or index_value >= len(attachments):
+            raise ClientInputError("attachment_index is out of range.")
+
+        attachment = attachments[index_value]
+        declared_size = getattr(attachment, "size", None)
+        if declared_size is not None:
+            check_attachment_size(int(declared_size))
+        content = await retry_read("read_attachment_bytes", attachment.read)
+        check_attachment_size(len(content))
+        archive = inspect_zip_attachment(content)
+        record_api_success("read_attachment")
+        log_action(
+            "read_attachment",
+            start_time,
+            "ok",
+            guild_id=(
+                channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID
+            ),
+            channel_id=resolved_channel_id,
+        )
+        meta = build_meta(
+            start_time,
+            request_id=request_id,
+            warnings=warnings,
+            guild_id=(
+                channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID
+            ),
+            channel_id=resolved_channel_id,
+        )
+        return success_response(
+            {
+                "channel_id": str(channel.id),
+                "message_id": str(message.id),
+                "attachment_index": index_value,
+                "attachment": attachment_metadata(attachment),
+                "content_base64": base64.b64encode(content).decode("ascii"),
+                "archive": archive,
+            },
+            meta,
+        )
+    except Exception as exc:
+        return error_with_log(
+            "read_attachment",
+            start_time,
+            request_id,
+            exception_to_error(exc),
             warnings=warnings,
             channel_id=resolved_channel_id,
         )

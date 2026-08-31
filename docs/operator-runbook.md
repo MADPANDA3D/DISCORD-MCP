@@ -69,8 +69,8 @@ Expected health facts:
 
 - `status` is `healthy`;
 - `version` matches the package;
-- `tool_count` is `55` and `agent_ready_tool_count` is `49`;
-- `catalog_version` is `discord-2026.08.27.1`;
+- `tool_count` is `56` and `agent_ready_tool_count` is `50`;
+- `catalog_version` is `discord-2026.08.31.2`;
 - build, source, image, and descriptor identities are present and non-sensitive;
 - provider scope is `server_scoped` or `request_scoped` as configured.
 
@@ -87,7 +87,7 @@ token in shell history. The minimum wire checks are:
 3. A wrong service credential returns `401` without reflection.
 4. An untrusted `Origin` returns `403`.
 5. MCP `initialize` reports server version `1.1.1`.
-6. `tools/list` returns exactly 55 tools.
+6. `tools/list` returns exactly 56 tools.
 7. `list_capabilities` returns the expected catalog and descriptor hash without a Discord call.
 8. `check_configuration` reports ready for the intended provider mode.
 

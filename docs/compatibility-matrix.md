@@ -2,12 +2,12 @@
 
 This matrix freezes the owner-approved Discord contract reconciled for MAD-728. The preserved
 compatibility projection is SHA-256
-`e0015cadb8aaa8b71d70c4ede394deb46526be9d2818b9475aa147490416c496`. It covers every native
+`ec180babf4949b8518c673fefcd4d9d74ce971aea159b9f487762c16b590190a`. It covers every native
 tool name, alias, contract tier, annotation, input property, required input, and declared output
 field. The approved access and confirmation projection is SHA-256
-`f7bfd20e6b018428944b6ea371fd7cd574b7b0e51e65e6e13b8a8ad0a9c7ccb8`. CI recomputes both.
+`ab4539c4a41264311429d2a8bf8839527f79a9ea1ffaf0790b592744cb11354c`. CI recomputes both.
 
-All 55 tools retain the normalized `ok/data/meta` or `ok/error/meta` envelope and semantic error
+All 56 tools retain the normalized `ok/data/meta` or `ok/error/meta` envelope and semantic error
 types. Provider calls remain request-scoped, retained jobs and cursors remain tenant-fingerprinted,
 tool output and retained state remain bounded, and the daily-audit/legacy-job helpers continue to
 offload multi-step work without sharing tenant state. Hidden tools are registered for compatibility
@@ -27,9 +27,10 @@ but excluded from agent-ready discovery.
 | `discord_job_status` | legacy | read | `job_status` | `task_id` | `error`, `action`, `result`, `status`, `task_id`, `created_at`, `started_at`, `finished_at` | none | Exact contract |
 | `edit_message` | agent_ready | destructive | `update_message` | — | `dry_run`, `jump_url`, `channel_id`, `message_id`, `diagnostics` | required | Exact contract |
 | `delete_message` | agent_ready | destructive | `remove_message` | — | `dry_run`, `channel_id`, `message_id`, `diagnostics` | required | Exact contract |
-| `read_messages` | agent_ready | read | `list_messages`, `get_messages` | — | `count`, `messages`, `channel_id`, `after_message_id`, `before_message_id` | none | Exact contract |
+| `read_messages` | agent_ready | read | `list_messages`, `get_messages` | — | `count`, `requested_count`, `fetched_count`, `messages`, `truncated`, `next_before_message_id`, `channel_id`, `after_message_id`, `before_message_id` | none | Bounded pagination extension |
 | `search_messages` | agent_ready | read | `find_messages`, `message_search` | — | `count`, `limit`, `filters`, `messages`, `channel_id` | none | Exact contract |
 | `analyze_attachment` | agent_ready | read | `ocr_attachment`, `describe_attachment` | — | `mode`, `text`, `model`, `usage`, `attachment`, `channel_id`, `message_id` | none | Exact contract |
+| `read_attachment` | agent_ready | read | `download_attachment`, `get_attachment` | — | `attachment_index`, `attachment`, `archive`, `content_base64`, `channel_id`, `message_id` | none | Additive tool |
 | `list_threads` | agent_ready | read | `get_threads` | — | `count`, `threads`, `channel_id` | none | Exact contract |
 | `create_thread` | agent_ready | write | `start_thread` | `channel_id`, `message_id`, `name` | `name`, `thread_id`, `message_id` | required | Exact contract |
 | `archive_thread` | agent_ready | destructive | `close_thread` | `thread_id` | `archived`, `thread_id` | required | Exact contract |

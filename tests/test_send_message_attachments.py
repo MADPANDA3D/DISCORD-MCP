@@ -34,6 +34,7 @@ class FakePermissions:
     view_channel = True
     read_message_history = True
     send_messages = True
+    send_messages_in_threads = True
     embed_links = True
     attach_files = True
     add_reactions = True
@@ -467,14 +468,14 @@ class SendMessageAttachmentTests(unittest.IsolatedAsyncioTestCase):
         server = import_server()
         fake_channel = FakeChannel()
 
-        async def fake_get_text_channel(channel_id):
+        async def fake_get_message_target(channel_id):
             self.assertEqual(channel_id, int(CHANNEL_ID))
             return fake_channel
 
         async def fake_get_bot_member(_guild):
             return object()
 
-        server.get_text_channel = fake_get_text_channel
+        server.get_message_target = fake_get_message_target
         server.get_bot_member = fake_get_bot_member
         server.log_action = lambda *args, **kwargs: None
 

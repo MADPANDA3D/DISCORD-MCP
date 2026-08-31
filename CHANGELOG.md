@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Added bounded Discord attachment retrieval with reusable base64 content and safe ZIP text
+  inspection, without returning credential-bearing CDN URLs.
+
+### Fixed
+
+- Restored thread delivery by authorizing a thread through its parent channel policy.
+- Made message history wire-safe with explicit continuation metadata instead of oversized-result
+  failures.
+- Exposed the exact `search_members` query-object shape in the provider manifest.
+
 ## [1.1.1] - 2026-08-27
 
 ### Fixed

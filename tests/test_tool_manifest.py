@@ -30,18 +30,18 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(manifest["schemaVersion"], "1.0.0")
         self.assertEqual(manifest["serviceId"], "discord")
-        self.assertEqual(manifest["catalogVersion"], "discord-2026.08.27.1")
+        self.assertEqual(manifest["catalogVersion"], "discord-2026.08.31.2")
         self.assertEqual(
             manifest["counts"],
             {
-                "raw": 55,
-                "agentReady": 49,
+                "raw": 56,
+                "agentReady": 50,
                 "legacy": 3,
                 "hidden": 3,
-                "documented": 55,
+                "documented": 56,
             },
         )
-        self.assertEqual(len(self.server.mcp._tool_manager._tools), 55)
+        self.assertEqual(len(self.server.mcp._tool_manager._tools), 56)
         self.assertEqual(
             [tool["nativeToolName"] for tool in manifest["tools"]],
             list(self.manifest_module.TOOL_DEFINITIONS),
@@ -79,11 +79,11 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             projection_hash(compatibility),
-            "e0015cadb8aaa8b71d70c4ede394deb46526be9d2818b9475aa147490416c496",
+            "ec180babf4949b8518c673fefcd4d9d74ce971aea159b9f487762c16b590190a",
         )
         self.assertEqual(
             projection_hash(controls),
-            "f7bfd20e6b018428944b6ea371fd7cd574b7b0e51e65e6e13b8a8ad0a9c7ccb8",
+            "ab4539c4a41264311429d2a8bf8839527f79a9ea1ffaf0790b592744cb11354c",
         )
 
         required = {
@@ -255,7 +255,7 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["data"]["descriptorsIncluded"])
         self.assertEqual(result["data"]["schemaVersion"], "1.0.0")
         self.assertEqual(result["data"]["serviceId"], "discord")
-        self.assertEqual(result["data"]["counts"]["raw"], 55)
+        self.assertEqual(result["data"]["counts"]["raw"], 56)
         self.assertEqual(result["data"]["tools"], manifest["tools"])
         self.assertEqual(
             result["data"]["descriptorHash"],
@@ -364,6 +364,23 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
                     descriptor["inputSchema"]["properties"]["action"]["enum"],
                     list(actions),
                 )
+
+    def test_search_members_descriptor_exposes_its_action_specific_query_shape(self):
+        descriptors = {
+            tool["nativeToolName"]: tool for tool in self.server.current_tool_manifest()["tools"]
+        }
+        schema = descriptors["discord_server_read"]["inputSchema"]
+        search_members = next(
+            branch
+            for branch in schema["allOf"]
+            if branch["if"]["properties"]["action"].get("const") == "search_members"
+        )
+        query_schema = search_members["then"]["properties"]["query"]
+
+        self.assertEqual(query_schema["type"], "object")
+        self.assertEqual(query_schema["required"], ["query"])
+        self.assertEqual(query_schema["properties"]["limit"]["maximum"], 100)
+        self.assertIn("never a bare string", schema["properties"]["query"]["description"])
 
 
 if __name__ == "__main__":
