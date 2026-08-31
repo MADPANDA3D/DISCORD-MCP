@@ -1660,7 +1660,7 @@ def _parameter_description(tool_name: str, parameter_name: str) -> str:
     if tool_name.startswith("discord_server_"):
         server_descriptions = {
             "action": "Exact reviewed operation enum for this read, write, or destructive server-management risk class.",
-            "query": "Action-specific JSON object, never a bare string. For search_members use {\"query\": \"trans\", \"limit\": 100}; unknown keys and limits above the official endpoint maximum are rejected.",
+            "query": 'Action-specific JSON object, never a bare string. For search_members use {"query": "trans", "limit": 100}; unknown keys and limits above the official endpoint maximum are rejected.',
             "reason": "Optional audit-log reason, at most 512 characters, accepted only when the official endpoint supports it.",
             "role_id": "Discord guild role snowflake; protected roles and roles at or above the bot are rejected for mutations.",
         }

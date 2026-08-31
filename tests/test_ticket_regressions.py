@@ -78,10 +78,7 @@ def fake_message(index):
         title="T" * 256,
         description="D" * 4_096,
         url="https://discord.test/embed",
-        fields=[
-            SimpleNamespace(name="N" * 256, value="V" * 1_024, inline=False)
-            for _ in range(8)
-        ],
+        fields=[SimpleNamespace(name="N" * 256, value="V" * 1_024, inline=False) for _ in range(8)],
         footer=None,
         author=None,
         color=None,
@@ -113,9 +110,7 @@ class TicketRegressionTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(self.server, "ALLOW_REQUEST_OVERRIDES", False),
             patch.object(self.server.discord, "Thread", FakeThread),
-            patch.object(
-                self.server, "get_message_target", AsyncMock(return_value=thread)
-            ),
+            patch.object(self.server, "get_message_target", AsyncMock(return_value=thread)),
             patch.object(self.server, "get_bot_member", AsyncMock(return_value=object())),
             patch.object(self.server, "require_write_allowed", require_write_allowed),
             patch.object(self.server, "is_write_allowed", return_value=True),
@@ -137,16 +132,12 @@ class TicketRegressionTests(unittest.IsolatedAsyncioTestCase):
         channel = FakeHistoryChannel([fake_message(index) for index in range(100)])
         with (
             patch.object(self.server, "ALLOW_REQUEST_OVERRIDES", False),
-            patch.object(
-                self.server, "get_message_target", AsyncMock(return_value=channel)
-            ),
+            patch.object(self.server, "get_message_target", AsyncMock(return_value=channel)),
             patch.object(self.server, "require_read_allowed", return_value=None),
             patch.object(self.server, "record_api_success"),
             patch.object(self.server, "log_action"),
         ):
-            result = await self.server.read_messages(
-                channel_id=str(PARENT_CHANNEL_ID), count="100"
-            )
+            result = await self.server.read_messages(channel_id=str(PARENT_CHANNEL_ID), count="100")
 
         self.assertTrue(result["ok"], result)
         self.assertTrue(result["data"]["truncated"])

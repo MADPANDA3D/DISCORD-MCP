@@ -1492,9 +1492,7 @@ def serialize_message_for_read(message) -> dict:
                 "url": getattr(embed, "url", None),
                 "fields": fields,
                 "truncated": bool(
-                    title_truncated
-                    or description_truncated
-                    or len(source_fields) > len(fields)
+                    title_truncated or description_truncated or len(source_fields) > len(fields)
                 ),
             }
         )
@@ -6358,18 +6356,14 @@ async def read_attachment(
             "read_attachment",
             start_time,
             "ok",
-            guild_id=(
-                channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID
-            ),
+            guild_id=(channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID),
             channel_id=resolved_channel_id,
         )
         meta = build_meta(
             start_time,
             request_id=request_id,
             warnings=warnings,
-            guild_id=(
-                channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID
-            ),
+            guild_id=(channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID),
             channel_id=resolved_channel_id,
         )
         return success_response(
