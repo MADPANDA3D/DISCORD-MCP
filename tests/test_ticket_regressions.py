@@ -62,9 +62,11 @@ class FakeHistoryChannel:
 
     def __init__(self, messages):
         self.messages = messages
+        self.oldest_first = None
 
-    def history(self, *, limit, before, after):
+    def history(self, *, limit, before, after, oldest_first):
         del before, after
+        self.oldest_first = oldest_first
 
         async def records():
             for message in self.messages[:limit]:
@@ -151,6 +153,24 @@ class TicketRegressionTests(unittest.IsolatedAsyncioTestCase):
             self.server.serialized_tool_result_size(result),
             self.server.MCP_TOOL_OUTPUT_MAX_BYTES,
         )
+
+    async def test_read_messages_forces_reverse_order_for_after_pagination(self):
+        channel = FakeHistoryChannel([fake_message(index) for index in range(3)])
+        with (
+            patch.object(self.server, "ALLOW_REQUEST_OVERRIDES", False),
+            patch.object(self.server, "get_message_target", AsyncMock(return_value=channel)),
+            patch.object(self.server, "require_read_allowed", return_value=None),
+            patch.object(self.server, "record_api_success"),
+            patch.object(self.server, "log_action"),
+        ):
+            result = await self.server.read_messages(
+                channel_id=str(PARENT_CHANNEL_ID),
+                count="3",
+                after_message_id=str(PARENT_CHANNEL_ID),
+            )
+
+        self.assertTrue(result["ok"], result)
+        self.assertFalse(channel.oldest_first)
 
 
 if __name__ == "__main__":

@@ -79,7 +79,7 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             projection_hash(compatibility),
-            "ec180babf4949b8518c673fefcd4d9d74ce971aea159b9f487762c16b590190a",
+            "3f692553b8c292570ce9da09c050fdcd0b8f26debc114dcbf3010a7d16e8119a",
         )
         self.assertEqual(
             projection_hash(controls),

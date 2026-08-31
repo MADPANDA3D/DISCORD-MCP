@@ -83,6 +83,43 @@ class ReadAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("url", result["data"]["attachment"])
         self.assertNotIn("secret", str(result))
 
+    async def test_read_attachment_chunks_content_to_output_ceiling(self):
+        content = b"x" * 20_000
+        attachment = SimpleNamespace(
+            filename="large.bin",
+            content_type="application/octet-stream",
+            size=len(content),
+            width=None,
+            height=None,
+            read=AsyncMock(return_value=content),
+        )
+        message = SimpleNamespace(id=1543824221258645584, attachments=[attachment])
+        channel = SimpleNamespace(
+            id=CHANNEL_ID,
+            guild=SimpleNamespace(id=GUILD_ID),
+            fetch_message=AsyncMock(return_value=message),
+        )
+        with (
+            patch.object(self.server, "MCP_TOOL_OUTPUT_MAX_BYTES", 4_096),
+            patch.object(self.server, "ALLOW_REQUEST_OVERRIDES", False),
+            patch.object(self.server, "get_message_target", AsyncMock(return_value=channel)),
+            patch.object(self.server, "require_read_allowed", return_value=None),
+            patch.object(self.server, "record_api_success"),
+            patch.object(self.server, "log_action"),
+        ):
+            first = await self.server.read_attachment(
+                channel_id=str(channel.id), message_id=str(message.id)
+            )
+            second = await self.server.read_attachment(
+                channel_id=str(channel.id),
+                message_id=str(message.id),
+                byte_offset=str(first["data"]["next_byte_offset"]),
+            )
+
+        self.assertTrue(first["data"]["content_truncated"])
+        self.assertEqual(second["data"]["content_offset"], first["data"]["next_byte_offset"])
+        self.assertLessEqual(self.server.serialized_tool_result_size(first), 4_096)
+
 
 if __name__ == "__main__":
     unittest.main()

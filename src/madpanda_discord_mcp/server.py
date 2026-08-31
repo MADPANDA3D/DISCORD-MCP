@@ -1597,15 +1597,19 @@ ARCHIVE_TEXT_SUFFIXES = {
     ".yml",
 }
 MAX_ARCHIVE_FILES = 100
+MAX_ARCHIVE_TEXT_BYTES = 8_192
 
 
-def inspect_zip_attachment(data: bytes) -> dict | None:
+def inspect_zip_attachment(
+    data: bytes, *, max_text_bytes: int = MAX_ARCHIVE_TEXT_BYTES
+) -> dict | None:
     """List a ZIP and decode bounded text entries without writing to disk."""
 
     if not zipfile.is_zipfile(io.BytesIO(data)):
         return None
     entries = []
     total_uncompressed = 0
+    returned_text_bytes = 0
     with zipfile.ZipFile(io.BytesIO(data)) as archive:
         infos = archive.infolist()
         if len(infos) > MAX_ARCHIVE_FILES:
@@ -1623,7 +1627,15 @@ def inspect_zip_attachment(data: bytes) -> dict | None:
                 "is_directory": info.is_dir(),
             }
             if not info.is_dir() and Path(info.filename).suffix.lower() in ARCHIVE_TEXT_SUFFIXES:
-                entry["text"] = archive.read(info).decode("utf-8", errors="replace")
+                remaining = max(0, max_text_bytes - returned_text_bytes)
+                with archive.open(info) as source:
+                    text_bytes = source.read(remaining + 1)
+                returned = text_bytes[:remaining]
+                entry["text"] = returned.decode("utf-8", errors="replace")
+                entry["text_bytes_returned"] = len(returned)
+                entry["text_total_bytes"] = info.file_size
+                entry["text_truncated"] = info.file_size > len(returned)
+                returned_text_bytes += len(returned)
             entries.append(entry)
     return {
         "format": "zip",
@@ -5714,7 +5726,13 @@ async def read_messages(
 
         async def fetch_history():
             return [
-                m async for m in channel.history(limit=limit, before=before_obj, after=after_obj)
+                m
+                async for m in channel.history(
+                    limit=limit,
+                    before=before_obj,
+                    after=after_obj,
+                    oldest_first=False,
+                )
             ]
 
         messages = await retry_read("read_messages", fetch_history)
@@ -5730,7 +5748,7 @@ async def read_messages(
         if output_truncated:
             warnings.append(
                 "Message records were bounded to the MCP output ceiling; continue with "
-                "next_before_message_id."
+                "next_before_message_id; preserve after_message_id when it was supplied."
             )
         log_action(
             "read_messages",
@@ -6306,6 +6324,7 @@ async def read_attachment(
     channel_id: str = "",
     message_id: str = "",
     attachment_index: str = "0",
+    byte_offset: str = "0",
 ) -> dict:
     """Download one Discord attachment and inspect bounded ZIP text entries."""
 
@@ -6350,7 +6369,17 @@ async def read_attachment(
             check_attachment_size(int(declared_size))
         content = await retry_read("read_attachment_bytes", attachment.read)
         check_attachment_size(len(content))
-        archive = inspect_zip_attachment(content)
+        offset_value = parse_int(byte_offset, 0)
+        if offset_value is None or offset_value < 0 or offset_value > len(content):
+            raise ClientInputError("byte_offset is outside the attachment.")
+        archive = (
+            inspect_zip_attachment(
+                content,
+                max_text_bytes=max(0, min(MAX_ARCHIVE_TEXT_BYTES, MCP_TOOL_OUTPUT_MAX_BYTES // 4)),
+            )
+            if offset_value == 0
+            else None
+        )
         record_api_success("read_attachment")
         log_action(
             "read_attachment",
@@ -6366,17 +6395,40 @@ async def read_attachment(
             guild_id=(channel.guild.id if getattr(channel, "guild", None) else DEFAULT_GUILD_ID),
             channel_id=resolved_channel_id,
         )
-        return success_response(
-            {
-                "channel_id": str(channel.id),
-                "message_id": str(message.id),
-                "attachment_index": index_value,
-                "attachment": attachment_metadata(attachment),
-                "content_base64": base64.b64encode(content).decode("ascii"),
-                "archive": archive,
-            },
-            meta,
+        data = {
+            "channel_id": str(channel.id),
+            "message_id": str(message.id),
+            "attachment_index": index_value,
+            "attachment": attachment_metadata(attachment),
+            "content_offset": offset_value,
+            "content_length": 0,
+            "content_total_bytes": len(content),
+            "content_truncated": offset_value < len(content),
+            "next_byte_offset": offset_value if offset_value < len(content) else None,
+            "content_base64": "",
+            "archive": archive,
+        }
+        available = max(
+            0,
+            MCP_TOOL_OUTPUT_MAX_BYTES
+            - serialized_tool_result_size(success_response(data, meta))
+            - 512,
         )
+        chunk = content[offset_value : offset_value + (available * 3 // 4)]
+        while True:
+            next_offset = offset_value + len(chunk)
+            data.update(
+                {
+                    "content_length": len(chunk),
+                    "content_truncated": next_offset < len(content),
+                    "next_byte_offset": next_offset if next_offset < len(content) else None,
+                    "content_base64": base64.b64encode(chunk).decode("ascii"),
+                }
+            )
+            result = success_response(data, meta)
+            if serialized_tool_result_size(result) <= MCP_TOOL_OUTPUT_MAX_BYTES:
+                return result
+            chunk = chunk[:-3]
     except Exception as exc:
         return error_with_log(
             "read_attachment",
