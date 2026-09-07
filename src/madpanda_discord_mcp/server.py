@@ -3593,6 +3593,27 @@ async def get_message_target(channel_id: int | str):
     return channel
 
 
+async def get_search_target(channel_id: int | str):
+    """Resolve a message history target or a forum that contains thread histories."""
+    client = await get_client()
+    resolved_id = parse_snowflake(channel_id)
+    if resolved_id is None:
+        raise ClientInputError("channelId cannot be null")
+    channel = client.get_channel(resolved_id)
+    if channel is None:
+        channel = await retry_read("fetch_channel", lambda: client.fetch_channel(resolved_id))
+        record_api_success("fetch_channel")
+    if channel is None or not isinstance(
+        channel,
+        (discord.TextChannel, discord.Thread, discord.ForumChannel),
+    ):
+        raise ClientInputError("Channel does not support message search")
+    active_guild_id = get_active_guild_id()
+    if active_guild_id is not None and channel.guild.id != active_guild_id:
+        raise ClientInputError("channelId does not belong to configured DISCORD_GUILD_ID")
+    return channel
+
+
 def is_message_target_allowed(channel) -> bool:
     if isinstance(channel, discord.Thread):
         parent_id = channel.parent_id
@@ -5932,7 +5953,7 @@ async def search_messages(
     resolved_channel_id = None
     try:
         resolved_channel_id = resolve_channel_id(channel_id)
-        channel = await get_message_target(resolved_channel_id)
+        channel = await get_search_target(resolved_channel_id)
         read_channel_id = (
             channel.parent_id
             if isinstance(channel, discord.Thread) and channel.parent_id
@@ -6030,9 +6051,13 @@ async def search_messages(
                 )
             ]
 
-        messages = await retry_read("search_messages", lambda: fetch_history(channel, limit_value))
+        messages = []
+        if not isinstance(channel, discord.ForumChannel):
+            messages = await retry_read(
+                "search_messages", lambda: fetch_history(channel, limit_value)
+            )
 
-        if include_threads and isinstance(channel, discord.TextChannel):
+        if include_threads and isinstance(channel, (discord.TextChannel, discord.ForumChannel)):
             remaining = max(limit_value - len(messages), 0)
             if remaining > 0:
                 threads = []
