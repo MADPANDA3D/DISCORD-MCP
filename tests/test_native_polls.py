@@ -153,9 +153,9 @@ class NativePollTests(unittest.IsolatedAsyncioTestCase):
         for property_schema in poll_schema["properties"].values():
             self.assertTrue(property_schema["description"])
         self.assertFalse(poll_schema["additionalProperties"])
-        output_poll = descriptor["outputSchema"]["oneOf"][0]["properties"]["data"][
-            "properties"
-        ]["poll"]
+        output_poll = descriptor["outputSchema"]["oneOf"][0]["properties"]["data"]["properties"][
+            "poll"
+        ]
         self.assertIn("object", output_poll["type"])
 
 

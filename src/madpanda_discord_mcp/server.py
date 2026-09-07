@@ -1543,7 +1543,9 @@ def extract_embed_text(embeds: list[discord.Embed] | None) -> str:
     return "\n".join(part for part in parts if part)
 
 
-def build_native_poll(poll_request: dict[str, Any] | None) -> tuple[discord.Poll | None, dict | None]:
+def build_native_poll(
+    poll_request: dict[str, Any] | None,
+) -> tuple[discord.Poll | None, dict | None]:
     """Validate the public poll contract and build discord.py's native Poll object."""
     if poll_request is None:
         return None, None
