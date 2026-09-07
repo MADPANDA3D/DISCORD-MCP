@@ -70,7 +70,7 @@ Expected health facts:
 - `status` is `healthy`;
 - `version` matches the package;
 - `tool_count` is `56` and `agent_ready_tool_count` is `50`;
-- `catalog_version` is `discord-2026.08.31.2`;
+- `catalog_version` is `discord-2026.09.07.2`;
 - build, source, image, and descriptor identities are present and non-sensitive;
 - provider scope is `server_scoped` or `request_scoped` as configured.
 

@@ -68,7 +68,7 @@ for profile in portal standalone-server standalone-request; do
     -e MCP_EXPECTED_TOOL_COUNT=56 \
     -e MCP_EXPECTED_AGENT_READY_COUNT=50 \
     -e MCP_EXPECTED_HIDDEN_COUNT=3 \
-    -e MCP_EXPECTED_CATALOG_VERSION=discord-2026.08.31.2 \
+    -e MCP_EXPECTED_CATALOG_VERSION=discord-2026.09.07.2 \
     -e MCP_ALLOWED_HOSTS=127.0.0.1:*,localhost:* \
     "$image" >/dev/null
 

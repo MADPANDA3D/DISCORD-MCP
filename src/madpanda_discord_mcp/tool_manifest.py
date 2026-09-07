@@ -20,7 +20,7 @@ from .discord_admin_api import DESTRUCTIVE_ACTIONS, READ_ACTIONS, WRITE_ACTIONS
 SCHEMA_VERSION = "1.0.0"
 SERVICE_ID = "discord"
 SERVICE_ALIASES = ("discord-mcp", "discord_mcp", "discord server")
-CATALOG_VERSION = "discord-2026.08.31.2"
+CATALOG_VERSION = "discord-2026.09.07.2"
 REPOSITORY_DOCS_URL = "https://github.com/MADPANDA3D/DISCORD-MCP/blob/main/docs/tool-catalog.md"
 GUILD_DOCS = "https://docs.discord.com/developers/resources/guild"
 CHANNEL_DOCS = "https://docs.discord.com/developers/resources/channel"
@@ -167,9 +167,11 @@ _DEFINITIONS = (
         "send_message",
         "Send Discord Message",
         "messages",
-        "you need to send text, an embed, or one attachment to an allowed channel",
-        "creates one or more messages and can create a continuation thread",
-        "message/channel/thread IDs, jump URL, attachment metadata, and a safe delivery plan",
+        "you need to send text, an embed, one attachment, or a native poll to an allowed channel",
+        "creates one or more messages, can create a continuation thread, and never emulates "
+        "polls with reactions",
+        "message/channel/thread IDs, jump URL, poll state, attachment metadata, and a safe "
+        "delivery plan",
         aliases=("post_message", "discord_send_message"),
         avoid="for DMs; use the dedicated direct-message tools",
         confirm=True,
@@ -898,6 +900,8 @@ PARAMETER_DESCRIPTIONS = {
     "include_timestamp": "When true, append a UTC timestamp to the acknowledgement.",
     "limit": "Maximum records or matches, expressed as a positive decimal string unless typed as integer.",
     "message": "Message text to send; do not include credentials or confirmation tokens.",
+    "poll": "Optional native Discord poll object with question, 2-10 answer strings, "
+    "duration_hours from 1-768, and allow_multiselect boolean.",
     "message_id": "Discord message snowflake identifying the target message.",
     "mode": "Attachment analysis mode: ocr extracts text; describe summarizes visual content.",
     "name": "Human-readable name for the Discord resource being created.",
@@ -948,6 +952,40 @@ FILE_OBJECT_SCHEMA = {
         },
     },
     "additionalProperties": False,
+}
+
+POLL_OBJECT_SCHEMA = {
+    "type": "object",
+    "description": PARAMETER_DESCRIPTIONS["poll"],
+    "additionalProperties": False,
+    "required": ["question", "answers"],
+    "properties": {
+        "question": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300,
+            "description": "Native Discord poll question, from 1 through 300 characters.",
+        },
+        "answers": {
+            "type": "array",
+            "minItems": 2,
+            "maxItems": 10,
+            "items": {"type": "string", "minLength": 1, "maxLength": 55},
+            "description": "Two through ten answer strings, each limited to 55 characters.",
+        },
+        "duration_hours": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 768,
+            "default": 24,
+            "description": "Whole hours the native poll remains open, from 1 through 768.",
+        },
+        "allow_multiselect": {
+            "type": "boolean",
+            "default": False,
+            "description": "When true, voters may select more than one answer.",
+        },
+    },
 }
 
 META_SCHEMA = {
@@ -1011,6 +1049,7 @@ OUTPUT_DATA_FIELDS = {
         "jump_url",
         "planned_parts",
         "attachments",
+        "poll",
         "diagnostics",
     ),
     "discord_smoke_test": ("ok", "steps", "message_id", "channel_id", "duration_ms"),
@@ -1235,6 +1274,7 @@ _OBJECT_OUTPUT_FIELDS = {
     "guild",
     "job",
     "nextAction",
+    "poll",
     "range_utc",
     "result",
     "results",
@@ -1698,6 +1738,15 @@ def enrich_input_schema(tool_name: str, input_schema: Mapping[str, Any]) -> dict
                     if isinstance(branch, dict) and branch.get("type") == "object":
                         any_of[index] = copy.deepcopy(FILE_OBJECT_SCHEMA)
                         break
+        elif parameter_name == "poll":
+            any_of = parameter_schema.get("anyOf")
+            if isinstance(any_of, list):
+                parameter_schema["anyOf"] = [
+                    copy.deepcopy(POLL_OBJECT_SCHEMA)
+                    if isinstance(branch, dict) and branch.get("type") == "object"
+                    else branch
+                    for branch in any_of
+                ]
         if parameter_name == "mode":
             parameter_schema["enum"] = ["ocr", "describe"]
         elif tool_name == "discord_server_read" and parameter_name == "action":

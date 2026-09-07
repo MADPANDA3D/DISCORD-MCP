@@ -30,7 +30,7 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(manifest["schemaVersion"], "1.0.0")
         self.assertEqual(manifest["serviceId"], "discord")
-        self.assertEqual(manifest["catalogVersion"], "discord-2026.08.31.2")
+        self.assertEqual(manifest["catalogVersion"], "discord-2026.09.07.2")
         self.assertEqual(
             manifest["counts"],
             {
@@ -79,7 +79,7 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(
             projection_hash(compatibility),
-            "3f692553b8c292570ce9da09c050fdcd0b8f26debc114dcbf3010a7d16e8119a",
+            "b37cce31f56b833b2e903ac82f7ca39fda2cfe38d5051bd6d6bbc5fca008eab6",
         )
         self.assertEqual(
             projection_hash(controls),

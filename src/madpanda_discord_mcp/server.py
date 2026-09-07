@@ -1515,6 +1515,7 @@ def serialize_message_for_read(message) -> dict:
         "has_attachments": bool(message.attachments),
         "has_links": bool(LINK_RE.search(get_message_text(message))),
         "has_embeds": bool(message.embeds),
+        "poll": serialize_native_poll(getattr(message, "poll", None)),
         "truncated_fields": sorted(set(truncated_fields)),
     }
 
@@ -1540,6 +1541,105 @@ def extract_embed_text(embeds: list[discord.Embed] | None) -> str:
         if embed.url:
             parts.append(embed.url)
     return "\n".join(part for part in parts if part)
+
+
+def build_native_poll(poll_request: dict[str, Any] | None) -> tuple[discord.Poll | None, dict | None]:
+    """Validate the public poll contract and build discord.py's native Poll object."""
+    if poll_request is None:
+        return None, None
+    if not isinstance(poll_request, dict):
+        raise ValueError("poll must be an object.")
+
+    allowed_keys = {
+        "question",
+        "answers",
+        "duration_hours",
+        "durationHours",
+        "allow_multiselect",
+        "allowMultiselect",
+    }
+    unknown = sorted(set(poll_request) - allowed_keys)
+    if unknown:
+        raise ValueError(f"Unsupported poll fields: {', '.join(unknown)}.")
+
+    question = poll_request.get("question")
+    if not isinstance(question, str) or not question.strip():
+        raise ValueError("poll.question must be a non-empty string.")
+    question = question.strip()
+    if len(question) > 300:
+        raise ValueError("poll.question exceeds 300 characters.")
+
+    answers = poll_request.get("answers")
+    if not isinstance(answers, list) or not 2 <= len(answers) <= 10:
+        raise ValueError("poll.answers must contain 2 to 10 answer strings.")
+    normalized_answers = []
+    for answer in answers:
+        if not isinstance(answer, str) or not answer.strip():
+            raise ValueError("Each poll answer must be a non-empty string.")
+        answer = answer.strip()
+        if len(answer) > 55:
+            raise ValueError("Each poll answer must be at most 55 characters.")
+        normalized_answers.append(answer)
+
+    duration_value = poll_request.get("duration_hours", poll_request.get("durationHours", 24))
+    if isinstance(duration_value, bool):
+        raise ValueError("poll.duration_hours must be an integer from 1 through 768.")
+    try:
+        duration_hours = int(duration_value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("poll.duration_hours must be an integer from 1 through 768.") from exc
+    if not 1 <= duration_hours <= 32 * 24:
+        raise ValueError("poll.duration_hours must be from 1 through 768 (32 days).")
+
+    multiselect_value = poll_request.get(
+        "allow_multiselect", poll_request.get("allowMultiselect", False)
+    )
+    if not isinstance(multiselect_value, bool):
+        raise ValueError("poll.allow_multiselect must be a boolean.")
+
+    native_poll = discord.Poll(
+        question=question,
+        duration=timedelta(hours=duration_hours),
+        multiple=multiselect_value,
+    )
+    for answer in normalized_answers:
+        native_poll.add_answer(text=answer)
+    return native_poll, {
+        "question": question,
+        "answers": normalized_answers,
+        "duration_hours": duration_hours,
+        "allow_multiselect": multiselect_value,
+    }
+
+
+def serialize_native_poll(poll: Any | None) -> dict | None:
+    """Expose bounded native poll state without leaking discord.py internals."""
+    if poll is None:
+        return None
+    question_media = getattr(poll, "question", None)
+    answers = []
+    for answer in list(getattr(poll, "answers", None) or [])[:10]:
+        media = getattr(answer, "media", None)
+        answers.append(
+            {
+                "id": str(getattr(answer, "id", "")) or None,
+                "text": getattr(media, "text", None) or getattr(answer, "text", None),
+                "emoji": str(getattr(media, "emoji", "") or "") or None,
+                "vote_count": int(getattr(answer, "vote_count", 0) or 0),
+                "self_voted": bool(getattr(answer, "self_voted", False)),
+            }
+        )
+    expires_at = getattr(poll, "expires_at", None)
+    is_finalized = getattr(poll, "is_finalized", False)
+    if callable(is_finalized):
+        is_finalized = is_finalized()
+    return {
+        "question": getattr(question_media, "text", None) or str(question_media or ""),
+        "answers": answers,
+        "expires_at": expires_at.isoformat() if expires_at is not None else None,
+        "allow_multiselect": bool(getattr(poll, "multiple", False)),
+        "is_finalized": bool(is_finalized),
+    }
 
 
 def merge_message_text(content: str | None, embed_text: str) -> str:
@@ -4644,12 +4744,13 @@ async def send_message(
     file_base64: str = "",
     file_name: str = "",
     file_content_type: str = "",
+    poll: dict | None = None,
     dry_run: bool | str = False,
     thread_if_split: bool | str = False,
     thread_name: str = "",
     confirm: str = "",
 ) -> dict:
-    """Send a Discord message with optional embed content and one optional attachment."""
+    """Send a Discord message with optional embed, attachment, or native poll."""
     start_time = time.perf_counter()
     request_id = str(uuid.uuid4())
     resolved_channel_id = None
@@ -4668,11 +4769,13 @@ async def send_message(
             file_content_type,
         )
         has_attachment = attachment_request is not None
+        native_poll, poll_plan = build_native_poll(poll)
+        has_poll = native_poll is not None
 
-        if not message and not embed_title and not embed_description and not has_attachment:
+        if not any((message, embed_title, embed_description, has_attachment, has_poll)):
             error = build_error(
                 "invalid_payload",
-                "message, embed content, or attachment must be provided.",
+                "message, embed content, attachment, or poll must be provided.",
             )
             return error_with_log(
                 "send_message",
@@ -4718,6 +4821,7 @@ async def send_message(
                 "policy_channel_id": str(write_channel_id),
                 "allowed_channel": is_write_allowed(write_channel_id),
                 "attachments_count": 1 if has_attachment else 0,
+                "poll": poll_plan,
             }
         )
         allow_error = require_write_allowed(
@@ -4782,6 +4886,21 @@ async def send_message(
         embed_parts = split_text(embed_description, 4096) if embed_description else []
         planned_parts = max(len(content_parts), len(embed_parts), 1)
         will_split = planned_parts > 1
+        if has_poll and will_split:
+            error = build_error(
+                "invalid_payload",
+                "A native poll cannot be combined with split message content.",
+                diagnostics=diagnostics,
+            )
+            return error_with_log(
+                "send_message",
+                start_time,
+                request_id,
+                error,
+                warnings=warnings,
+                guild_id=channel.guild.id if channel else get_active_guild_id(),
+                channel_id=resolved_channel_id,
+            )
         diagnostics.update(
             {
                 "content_length": content_length,
@@ -4961,6 +5080,8 @@ async def send_message(
                     }
                     if prepared_attachment is not None and prepared_attachment.file is not None:
                         send_kwargs["file"] = prepared_attachment.file
+                    if native_poll is not None:
+                        send_kwargs["poll"] = native_poll
                     sent_message = await channel.send(**send_kwargs)
                     sent_message_ids.append(str(sent_message.id))
                     if thread_planned and sent_message is not None:
@@ -5010,6 +5131,7 @@ async def send_message(
             "attachments": [prepared_attachment.metadata]
             if prepared_attachment is not None
             else [],
+            "poll": serialize_native_poll(getattr(sent_message, "poll", None)) or poll_plan,
             "diagnostics": diagnostics,
         }
         return success_response(data, meta)
