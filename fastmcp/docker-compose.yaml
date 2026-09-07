@@ -14,6 +14,7 @@ services:
       MCP_MODE: portal
       DISCORD_CREDENTIAL_MODE: request
       DISCORD_ALLOWED_CHANNEL_IDS: ALL
+      MCP_ALLOWED_HOSTS: localhost:*,127.0.0.1:*,[::1]:*,discord-mcp:*,discord-mcp.madpanda3d.com
     networks:
       - default
       - mcp-network
