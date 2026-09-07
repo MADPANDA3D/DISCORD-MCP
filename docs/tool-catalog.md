@@ -1,6 +1,6 @@
 # Tool catalog
 
-Catalog: `discord-2026.08.31.2`
+Catalog: `discord-2026.09.07.2`
 
 | Contract field | Value |
 |---|---:|
@@ -30,7 +30,7 @@ operator aid; Discord remains authoritative for the exact permission calculation
 | `discord_server_destructive` | Server management | Destructive | Agent-ready | Admin + confirm | Action-specific Discord permission, hierarchy, and local policy |
 | `discord_health_check` | Configuration | Read | Agent-ready | Standard | Guild and sampled channel visibility |
 | `discord_ack` | Messages | Write | Agent-ready | Confirm | Send Messages |
-| `send_message` | Messages | Write | Agent-ready | Confirm | Send Messages; optional Embed Links / Attach Files |
+| `send_message` | Messages | Write | Agent-ready | Confirm | Send Messages; optional native poll / Embed Links / Attach Files |
 | `discord_smoke_test` | Operations | Destructive | Legacy | Admin + confirm | Read, send, edit, delete test message |
 | `discord_job_submit` | Operations | Write | Legacy | Standard | Depends on delegated legacy action |
 | `discord_job_status` | Operations | Read | Legacy | Standard | None beyond original action context |

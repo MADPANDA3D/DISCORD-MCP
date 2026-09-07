@@ -164,7 +164,7 @@ See [Portal compatibility](docs/portal-compat.md) for the complete broker and ad
 
 ## Tool inventory
 
-The immutable catalog `discord-2026.08.31.2` contains **56 registered tools**:
+The immutable catalog `discord-2026.09.07.2` contains **56 registered tools**:
 
 - **50 agent-ready**
 - **3 legacy compatibility tools**
@@ -181,7 +181,7 @@ The immutable catalog `discord-2026.08.31.2` contains **56 registered tools**:
 | Configuration | `discord_health_check` |
 | Channels | `create_text_channel`, `delete_channel`, `find_channel`, `list_channels` |
 | Categories | `create_category`, `delete_category`, `find_category`, `list_channels_in_category` |
-| Messages | `discord_ack`, `send_message`, `edit_message`, `delete_message`, `read_messages`, `search_messages`, `read_attachment`, `analyze_attachment` |
+| Messages | `discord_ack`, `send_message` (text, embeds, attachments, or native polls), `edit_message`, `delete_message`, `read_messages`, `search_messages`, `read_attachment`, `analyze_attachment` |
 | Threads | `list_threads`, `create_thread`, `archive_thread`, `unarchive_thread` |
 | Reactions | `add_reaction`, `remove_reaction` |
 | Members | `edit_nickname`, `get_user_id_by_name` |
