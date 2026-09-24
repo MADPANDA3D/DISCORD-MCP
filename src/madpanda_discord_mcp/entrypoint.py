@@ -1,3 +1,4 @@
+import copy
 from collections.abc import Mapping
 from typing import Any
 
@@ -22,8 +23,18 @@ def _enrich_input_schema(tool_name: str, schema: Mapping[str, Any]) -> dict[str,
     return describe_admin_read_schema(tool_name, schema, _original_enrich_input_schema)
 
 
-def main() -> None:
+def _install_response_bounds() -> None:
     discord_admin_api.bound_response = _bound_response
     tool_manifest.enrich_input_schema = _enrich_input_schema
     server.enrich_input_schema = _enrich_input_schema
+    for tool_name, runtime_tool in server.mcp._tool_manager._tools.items():
+        runtime_tool.parameters = describe_admin_read_schema(
+            tool_name,
+            runtime_tool.parameters,
+            lambda _name, schema: copy.deepcopy(dict(schema)),
+        )
+
+
+def main() -> None:
+    _install_response_bounds()
     server.main()

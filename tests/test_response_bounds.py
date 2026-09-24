@@ -1,4 +1,6 @@
+import importlib
 import json
+import os
 import unittest
 
 from madpanda_discord_mcp.response_bounds import (
@@ -33,6 +35,21 @@ class ResponseBoundsTests(unittest.TestCase):
         )
 
         description = result["properties"]["query"]["description"]
+        self.assertIn("between 1 and 100", description)
+        self.assertIn("next_after", description)
+
+    def test_entrypoint_refreshes_the_registered_native_schema(self):
+        os.environ.setdefault("MCP_MODE", "standalone")
+        os.environ.setdefault("MCP_ACCESS_TOKEN", "response-bounds-access-" + ("a" * 32))
+        os.environ.setdefault("DISCORD_TOKEN", "response-bounds-token")
+        os.environ.setdefault("DISCORD_GUILD_ID", str(123_456_789_012_345_678))
+        os.environ.setdefault("DISCORD_ALLOWED_CHANNEL_IDS", "ALL")
+        entrypoint = importlib.import_module("madpanda_discord_mcp.entrypoint")
+
+        entrypoint._install_response_bounds()
+
+        schema = entrypoint.server.mcp._tool_manager._tools["discord_server_read"].parameters
+        description = schema["properties"]["query"]["description"]
         self.assertIn("between 1 and 100", description)
         self.assertIn("next_after", description)
 

@@ -3603,9 +3603,8 @@ async def get_search_target(channel_id: int | str):
     if channel is None:
         channel = await retry_read("fetch_channel", lambda: client.fetch_channel(resolved_id))
         record_api_success("fetch_channel")
-    if channel is None or not isinstance(
-        channel,
-        (discord.TextChannel, discord.Thread, discord.ForumChannel),
+    if channel is None or not (
+        isinstance(channel, discord.ForumChannel) or callable(getattr(channel, "history", None))
     ):
         raise ClientInputError("Channel does not support message search")
     active_guild_id = get_active_guild_id()

@@ -48,10 +48,30 @@ class FakeForumThread:
         return records()
 
 
+class FakeVoiceChannel:
+    id = FORUM_ID
+    guild = SimpleNamespace(id=GUILD_ID)
+
+    def history(self, **_kwargs):
+        return None
+
+
 class SearchMessagesForumTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
         cls.server = import_server()
+
+    async def test_search_target_accepts_voice_text_history(self):
+        channel = FakeVoiceChannel()
+        client = SimpleNamespace(get_channel=lambda _channel_id: channel)
+
+        with (
+            patch.object(self.server, "get_client", AsyncMock(return_value=client)),
+            patch.object(self.server.discord, "ForumChannel", FakeForumChannel),
+        ):
+            result = await self.server.get_search_target(str(FORUM_ID))
+
+        self.assertIs(result, channel)
 
     async def test_search_messages_searches_forum_post_threads(self):
         message = SimpleNamespace(
