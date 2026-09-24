@@ -47,7 +47,7 @@ dev = [
 ]
 
 [project.scripts]
-mad-mcp-discord = "madpanda_discord_mcp.server:main"
+mad-mcp-discord = "madpanda_discord_mcp.entrypoint:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/madpanda_discord_mcp"]

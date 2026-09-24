@@ -114,6 +114,12 @@ class DiscordAdminApiTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "missing required fields: name"):
             validate_payload(OPERATIONS["create_role"], {"mentionable": True})
 
+        modify_channel = OPERATIONS["modify_channel"]
+        forum_update = {"flags": 16, "template": "Post: {content}"}
+        self.assertEqual(validate_payload(modify_channel, forum_update), forum_update)
+        with self.assertRaisesRegex(ValueError, "Unsupported payload fields: token"):
+            validate_payload(modify_channel, {**forum_update, "token": "secret"})
+
     def test_response_redacts_credentials_and_stays_within_wire_budget(self):
         response = bound_response(
             {

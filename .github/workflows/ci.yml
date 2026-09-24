@@ -168,7 +168,7 @@ jobs:
           assert __version__ == '1.1.1'
           assert mcp._mcp_server.version == '1.1.1'
           manifest = current_tool_manifest()
-          assert manifest['catalogVersion'] == 'discord-2026.08.31.2'
+          assert manifest['catalogVersion'] == 'discord-2026.09.07.3'
           assert manifest['counts'] == {
               'raw': 56,
               'agentReady': 50,
@@ -182,7 +182,7 @@ jobs:
               if item.name == 'mad-mcp-discord'
           ]
           assert len(matches) == 1
-          assert matches[0].value == 'madpanda_discord_mcp.server:main'
+          assert matches[0].value == 'madpanda_discord_mcp.entrypoint:main'
           PY
 
   image:

@@ -1,0 +1,28 @@
+name: fastmcp
+
+# Stable Portal deployment entrypoint used by the Tech Support Agent assignment.
+# Request-scoped Discord credentials are supplied by MAD MCP Portal, so this
+# profile does not require a host bot token or an MCP access token.
+services:
+  discord-mcp:
+    extends:
+      file: ../docker-compose.yml
+      service: discord-mcp
+    build:
+      context: ..
+    environment:
+      MCP_MODE: portal
+      DISCORD_CREDENTIAL_MODE: request
+      DISCORD_ALLOWED_CHANNEL_IDS: ALL
+      # Portal previews and write calls still provide the request-scoped admin
+      # opt-in; this is the server ceiling that permits those reviewed calls.
+      MCP_ADMIN_TOOLS_ENABLED: "true"
+      MCP_ALLOWED_HOSTS: ${MCP_ALLOWED_HOSTS:-localhost:*,127.0.0.1:*,[::1]:*,discord-mcp:*}
+    networks:
+      - default
+      - mcp-network
+
+networks:
+  mcp-network:
+    external: true
+    name: mcp-network
