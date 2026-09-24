@@ -3574,8 +3574,11 @@ async def get_text_channel(
     return channel
 
 
-async def get_message_target(channel_id: int | str):
-    client = await get_client()
+async def get_message_target(
+    channel_id: int | str, client: commands.Bot | None = None
+):
+    if client is None:
+        client = await get_client()
     resolved_id = parse_snowflake(channel_id)
     if resolved_id is None:
         raise ClientInputError("channelId cannot be null")
@@ -5520,15 +5523,23 @@ async def edit_message(
             return error_with_log("edit_message", start_time, request_id, error)
 
         resolved_channel_id = resolve_channel_id(channel_id)
+        client = await ensure_client_ready()
+        channel = await get_message_target(resolved_channel_id, client)
+        policy_channel_id = (
+            channel.parent_id
+            if isinstance(channel, discord.Thread) and channel.parent_id
+            else channel.id
+        )
         diagnostics = {
             "resolved_channel_id": str(resolved_channel_id),
-            "allowed_channel": is_write_allowed(resolved_channel_id),
+            "policy_channel_id": str(policy_channel_id),
+            "allowed_channel": is_write_allowed(policy_channel_id),
             "content_length": len(new_message),
             "content_limit": 2000,
         }
 
         allow_error = require_write_allowed(
-            resolved_channel_id,
+            policy_channel_id,
             "edit_message",
             start_time,
             request_id,
@@ -5538,8 +5549,6 @@ async def edit_message(
         if allow_error:
             return allow_error
 
-        client = await ensure_client_ready()
-        channel = await get_text_channel(resolved_channel_id, client)
         member = await get_bot_member(channel.guild)
         perms = (
             channel.permissions_for(member) if member is not None else discord.Permissions.none()
