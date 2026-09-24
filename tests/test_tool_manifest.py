@@ -30,7 +30,7 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(manifest["schemaVersion"], "1.0.0")
         self.assertEqual(manifest["serviceId"], "discord")
-        self.assertEqual(manifest["catalogVersion"], "discord-2026.09.07.2")
+        self.assertEqual(manifest["catalogVersion"], "discord-2026.09.07.3")
         self.assertEqual(
             manifest["counts"],
             {
@@ -77,6 +77,12 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
             encoded = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
             return hashlib.sha256(encoded).hexdigest()
 
+        # TKT-000426 intentionally tightens only search_messages: hosted search has
+        # no implicit default channel. Preserve the approved legacy projection for
+        # every other compatibility field while asserting this delta separately.
+        search_contract = next(item for item in compatibility if item["name"] == "search_messages")
+        self.assertIn("channel_id", search_contract["required"])
+        search_contract["required"].remove("channel_id")
         self.assertEqual(
             projection_hash(compatibility),
             "b37cce31f56b833b2e903ac82f7ca39fda2cfe38d5051bd6d6bbc5fca008eab6",

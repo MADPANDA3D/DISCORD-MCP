@@ -451,6 +451,18 @@ class TenantStateTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cached_a[0].name, "tenant-1")
         self.assertEqual(len(self.server.CHANNEL_CACHE), 2)
 
+    async def test_forced_channel_refresh_replaces_valid_cached_snapshot(self):
+        guild = FakeGuild()
+        with self.runtime_policy(), self.tenant(TOKEN_A):
+            initial, _, _ = await self.server.get_cached_channels(guild)
+            refreshed, _, _ = await self.server.get_cached_channels(guild, force_refresh=True)
+            cached, _, _ = await self.server.get_cached_channels(guild)
+
+        self.assertEqual(guild.fetch_count, 2)
+        self.assertEqual(initial[0].name, "tenant-1")
+        self.assertEqual(refreshed[0].name, "tenant-2")
+        self.assertEqual(cached[0].name, "tenant-2")
+
 
 if __name__ == "__main__":
     unittest.main()

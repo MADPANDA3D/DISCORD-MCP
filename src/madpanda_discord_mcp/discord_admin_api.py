@@ -928,6 +928,7 @@ _OPERATIONS = (
             "default_thread_rate_limit_per_user",
             "default_sort_order",
             "default_forum_layout",
+            "template",
             "archived",
             "auto_archive_duration",
             "locked",

@@ -9164,7 +9164,7 @@ async def list_channels(guild_id: str = "") -> dict:
             return error_with_log("list_channels", start_time, request_id, error)
         client = await get_client()
         guild = await get_guild(guild_id, client)
-        channels, _, _ = await get_cached_channels(guild)
+        channels, _, _ = await get_cached_channels(guild, force_refresh=True)
         channels = filter_channels_for_read(channels)
         if not channels:
             error = build_error("not_found", "No channels found by guildId.")

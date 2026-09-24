@@ -20,7 +20,7 @@ from .discord_admin_api import DESTRUCTIVE_ACTIONS, READ_ACTIONS, WRITE_ACTIONS
 SCHEMA_VERSION = "1.0.0"
 SERVICE_ID = "discord"
 SERVICE_ALIASES = ("discord-mcp", "discord_mcp", "discord server")
-CATALOG_VERSION = "discord-2026.09.07.2"
+CATALOG_VERSION = "discord-2026.09.07.3"
 REPOSITORY_DOCS_URL = "https://github.com/MADPANDA3D/DISCORD-MCP/blob/main/docs/tool-catalog.md"
 GUILD_DOCS = "https://docs.discord.com/developers/resources/guild"
 CHANNEL_DOCS = "https://docs.discord.com/developers/resources/channel"
@@ -1771,6 +1771,18 @@ def enrich_input_schema(tool_name: str, input_schema: Mapping[str, Any]) -> dict
             ]
         elif tool_name == "find_tools" and parameter_name == "risk":
             parameter_schema["enum"] = ["", "read", "write", "destructive"]
+    if tool_name == "search_messages":
+        channel_schema = properties.get("channel_id")
+        if isinstance(channel_schema, dict):
+            channel_schema["minLength"] = 1
+            channel_schema["pattern"] = r".*\S.*"
+            channel_schema["description"] = (
+                "Required Discord channel snowflake to search; blank values are rejected because "
+                "hosted Portal requests do not have an implicit default channel."
+            )
+        required = schema.setdefault("required", [])
+        if "channel_id" not in required:
+            required.append("channel_id")
     if tool_name == "discord_server_read":
         schema.setdefault("allOf", []).append(
             {

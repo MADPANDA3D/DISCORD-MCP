@@ -14,6 +14,9 @@ services:
       MCP_MODE: portal
       DISCORD_CREDENTIAL_MODE: request
       DISCORD_ALLOWED_CHANNEL_IDS: ALL
+      # Portal previews and write calls still provide the request-scoped admin
+      # opt-in; this is the server ceiling that permits those reviewed calls.
+      MCP_ADMIN_TOOLS_ENABLED: "true"
       MCP_ALLOWED_HOSTS: localhost:*,127.0.0.1:*,[::1]:*,discord-mcp:*,discord-mcp.madpanda3d.com
     networks:
       - default
