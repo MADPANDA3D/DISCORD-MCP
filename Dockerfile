@@ -38,7 +38,9 @@ LABEL org.opencontainers.image.title="MADPANDA3D Discord MCP" \
       com.madpanda.source-fingerprint="${SOURCE_FINGERPRINT}"
 
 RUN apt-get update \
-    && apt-get install --yes --no-install-recommends ca-certificates \
+    && apt-get install --yes --no-install-recommends \
+      ca-certificates \
+      libpcre2-8-0=10.42-1+deb12u1 \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 10001 app \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app \
