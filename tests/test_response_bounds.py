@@ -9,10 +9,7 @@ from madpanda_discord_mcp.response_bounds import (
 
 class ResponseBoundsTests(unittest.TestCase):
     def test_oversized_member_list_keeps_prefix_and_resume_cursor(self):
-        members = [
-            {"user": {"id": str(index)}, "bio": "x" * 1_000}
-            for index in range(100, 200)
-        ]
+        members = [{"user": {"id": str(index)}, "bio": "x" * 1_000} for index in range(100, 200)]
 
         result = bound_list_response(members, redact=lambda value: value, max_response_bytes=8_000)
 
