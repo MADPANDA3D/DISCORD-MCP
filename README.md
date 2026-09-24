@@ -164,7 +164,7 @@ See [Portal compatibility](docs/portal-compat.md) for the complete broker and ad
 
 ## Tool inventory
 
-The immutable catalog `discord-2026.09.07.2` contains **56 registered tools**:
+The immutable catalog `discord-2026.09.07.3` contains **56 registered tools**:
 
 - **50 agent-ready**
 - **3 legacy compatibility tools**

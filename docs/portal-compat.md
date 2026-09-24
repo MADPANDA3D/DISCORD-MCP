@@ -92,7 +92,7 @@ provider_credentials:
     - x-discord-guild-id
     - x-discord-allowed-channels
 catalog:
-  version: discord-2026.09.07.2
+  version: discord-2026.09.07.3
   raw_tools: 56
   agent_ready_tools: 50
   legacy_tools: 3
