@@ -1,8 +1,8 @@
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from . import discord_admin_api, server, tool_manifest
 from .response_bounds import bound_list_response, describe_admin_read_schema
-
 
 _original_bound_response = discord_admin_api.bound_response
 _original_enrich_input_schema = tool_manifest.enrich_input_schema
