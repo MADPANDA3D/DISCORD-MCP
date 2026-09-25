@@ -3574,9 +3574,7 @@ async def get_text_channel(
     return channel
 
 
-async def get_message_target(
-    channel_id: int | str, client: commands.Bot | None = None
-):
+async def get_message_target(channel_id: int | str, client: commands.Bot | None = None):
     if client is None:
         client = await get_client()
     resolved_id = parse_snowflake(channel_id)

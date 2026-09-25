@@ -187,7 +187,9 @@ class TicketRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(preview["ok"], preview)
         self.assertTrue(executed["ok"], executed)
         self.assertEqual(policy_ids, [PARENT_CHANNEL_ID, PARENT_CHANNEL_ID])
-        self.assertEqual(preview["data"]["diagnostics"]["policy_channel_id"], str(PARENT_CHANNEL_ID))
+        self.assertEqual(
+            preview["data"]["diagnostics"]["policy_channel_id"], str(PARENT_CHANNEL_ID)
+        )
         self.assertEqual(executed["data"]["channel_id"], str(THREAD_ID))
         self.assertEqual(message.edited_content, "updated starter")
 
