@@ -3080,8 +3080,13 @@ def require_write_allowed(
     warnings: list[str] | None = None,
     guild_id: int | None = None,
     diagnostics: dict | None = None,
+    target_channel_id: int | None = None,
 ) -> dict | None:
-    if channel_id in get_active_blocked_channel_ids():
+    blocked_channel_ids = get_active_blocked_channel_ids()
+    blocked_channel_id = (
+        target_channel_id if target_channel_id in blocked_channel_ids else channel_id
+    )
+    if blocked_channel_id in blocked_channel_ids:
         error = build_error(
             "permission_denied",
             "Channel is blocked from writes.",
@@ -3095,7 +3100,7 @@ def require_write_allowed(
             error,
             warnings=warnings,
             guild_id=guild_id,
-            channel_id=channel_id,
+            channel_id=blocked_channel_id,
         )
     if is_write_allowed(channel_id):
         return None
@@ -4854,6 +4859,7 @@ async def send_message(
             request_id,
             warnings=warnings,
             diagnostics=diagnostics,
+            target_channel_id=resolved_channel_id,
         )
         if allow_error:
             return allow_error
@@ -5543,6 +5549,7 @@ async def edit_message(
             request_id,
             warnings=warnings,
             diagnostics=diagnostics,
+            target_channel_id=resolved_channel_id,
         )
         if allow_error:
             return allow_error
@@ -6854,6 +6861,7 @@ async def archive_thread(thread_id: str, confirm: str = "") -> dict:
             start_time,
             request_id,
             warnings=warnings,
+            target_channel_id=thread.id,
         )
         if allow_error:
             return allow_error
@@ -6924,6 +6932,7 @@ async def unarchive_thread(thread_id: str, confirm: str = "") -> dict:
             start_time,
             request_id,
             warnings=warnings,
+            target_channel_id=thread.id,
         )
         if allow_error:
             return allow_error

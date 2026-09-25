@@ -193,6 +193,38 @@ class TicketRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(executed["data"]["channel_id"], str(THREAD_ID))
         self.assertEqual(message.edited_content, "updated starter")
 
+    async def test_edit_message_rejects_blocked_thread_even_when_parent_is_allowed(self):
+        bot_user = SimpleNamespace(id=123_456_789_012_345_681)
+        thread = FakeThread()
+        message = FakeEditableMessage(bot_user.id)
+        thread.message = message
+        get_bot_member = AsyncMock(return_value=object())
+
+        with (
+            patch.object(self.server, "get_active_admin_tools_enabled", return_value=True),
+            patch.object(self.server.discord, "Thread", FakeThread),
+            patch.object(
+                self.server,
+                "ensure_client_ready",
+                AsyncMock(return_value=SimpleNamespace(user=bot_user)),
+            ),
+            patch.object(self.server, "get_message_target", AsyncMock(return_value=thread)),
+            patch.object(self.server, "get_active_blocked_channel_ids", return_value={THREAD_ID}),
+            patch.object(self.server, "get_bot_member", get_bot_member),
+            patch.object(self.server, "log_action"),
+        ):
+            result = await self.server.edit_message(
+                channel_id=str(THREAD_ID),
+                message_id=str(THREAD_ID),
+                new_message="must not be edited",
+                confirm=self.server.CONFIRM_APPLY_VALUE,
+            )
+
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["error"]["message"], "Channel is blocked from writes.")
+        self.assertIsNone(message.edited_content)
+        get_bot_member.assert_not_awaited()
+
     async def test_read_messages_returns_bounded_page_with_continuation(self):
         channel = FakeHistoryChannel([fake_message(index) for index in range(100)])
         with (
