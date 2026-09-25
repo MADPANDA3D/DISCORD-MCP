@@ -37,8 +37,8 @@ LABEL org.opencontainers.image.title="MADPANDA3D Discord MCP" \
       org.opencontainers.image.licenses="MIT" \
       com.madpanda.source-fingerprint="${SOURCE_FINGERPRINT}"
 
-RUN apt-get update \
-    && apt-get install --yes --no-install-recommends \
+RUN apt-get -o Acquire::Retries=3 update \
+    && apt-get -o Acquire::Retries=3 install --yes --no-install-recommends \
       ca-certificates \
       libpcre2-8-0=10.42-1+deb12u1 \
     && rm -rf /var/lib/apt/lists/* \
