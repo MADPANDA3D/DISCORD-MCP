@@ -267,6 +267,40 @@ class TicketRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result["ok"], result)
         self.assertFalse(channel.oldest_first)
 
+    def test_effective_permissions_maps_public_user_id_to_member_target(self):
+        user_id = "1229101510546423960"
+
+        self.assertEqual(
+            self.server._effective_permission_target(
+                {"user_id": user_id, "role_id": "", "target_id": ""},
+                {},
+            ),
+            (user_id, "member"),
+        )
+
+    def test_effective_permissions_preserves_explicit_role_target(self):
+        role_id = "1504035993781534784"
+
+        self.assertEqual(
+            self.server._effective_permission_target(
+                {"user_id": "", "role_id": "", "target_id": role_id},
+                {"target_type": "role"},
+            ),
+            (role_id, "role"),
+        )
+
+    def test_effective_permissions_rejects_ambiguous_or_conflicting_targets(self):
+        with self.assertRaisesRegex(ValueError, "only one"):
+            self.server._effective_permission_target(
+                {"user_id": "1229101510546423960", "role_id": "1504035993781534784"},
+                {},
+            )
+        with self.assertRaisesRegex(ValueError, "selects target_type=member"):
+            self.server._effective_permission_target(
+                {"user_id": "1229101510546423960"},
+                {"target_type": "role"},
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
