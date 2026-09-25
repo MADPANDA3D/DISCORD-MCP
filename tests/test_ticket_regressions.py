@@ -44,6 +44,7 @@ class FakeThread:
 
     def __init__(self):
         self.sent = []
+        self.message = None
 
     def permissions_for(self, _member):
         return FakePermissions()
@@ -53,6 +54,22 @@ class FakeThread:
         return SimpleNamespace(
             id=123_456_789_012_345_699,
             jump_url="https://discord.test/thread/message",
+        )
+
+    async def fetch_message(self, _message_id):
+        return self.message
+
+
+class FakeEditableMessage:
+    def __init__(self, author_id):
+        self.author = SimpleNamespace(id=author_id)
+        self.edited_content = None
+
+    async def edit(self, *, content):
+        self.edited_content = content
+        return SimpleNamespace(
+            id=THREAD_ID,
+            jump_url="https://discord.test/thread/starter",
         )
 
 
@@ -129,6 +146,84 @@ class TicketRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(policy_ids, [PARENT_CHANNEL_ID])
         self.assertEqual(result["data"]["channel_id"], str(THREAD_ID))
         self.assertEqual(thread.sent[0]["content"], "thread delivery")
+
+    async def test_edit_message_accepts_forum_starter_and_authorizes_parent(self):
+        bot_user = SimpleNamespace(id=123_456_789_012_345_681)
+        client = SimpleNamespace(user=bot_user)
+        thread = FakeThread()
+        message = FakeEditableMessage(bot_user.id)
+        thread.message = message
+        policy_ids = []
+
+        def require_write_allowed(channel_id, *_args, **_kwargs):
+            policy_ids.append(channel_id)
+            return None
+
+        with (
+            patch.object(self.server, "get_active_admin_tools_enabled", return_value=True),
+            patch.object(self.server.discord, "Thread", FakeThread),
+            patch.object(self.server, "ensure_client_ready", AsyncMock(return_value=client)),
+            patch.object(self.server, "get_message_target", AsyncMock(return_value=thread)),
+            patch.object(self.server, "get_bot_member", AsyncMock(return_value=object())),
+            patch.object(self.server, "require_write_allowed", require_write_allowed),
+            patch.object(self.server, "is_write_allowed", return_value=True),
+            patch.object(self.server, "record_api_success"),
+            patch.object(self.server, "log_action"),
+        ):
+            preview = await self.server.edit_message(
+                channel_id=str(THREAD_ID),
+                message_id=str(THREAD_ID),
+                new_message="updated starter",
+                confirm=self.server.CONFIRM_APPLY_VALUE,
+                dry_run=True,
+            )
+            executed = await self.server.edit_message(
+                channel_id=str(THREAD_ID),
+                message_id=str(THREAD_ID),
+                new_message="updated starter",
+                confirm=self.server.CONFIRM_APPLY_VALUE,
+            )
+
+        self.assertTrue(preview["ok"], preview)
+        self.assertTrue(executed["ok"], executed)
+        self.assertEqual(policy_ids, [PARENT_CHANNEL_ID, PARENT_CHANNEL_ID])
+        self.assertEqual(
+            preview["data"]["diagnostics"]["policy_channel_id"], str(PARENT_CHANNEL_ID)
+        )
+        self.assertEqual(executed["data"]["channel_id"], str(THREAD_ID))
+        self.assertEqual(message.edited_content, "updated starter")
+
+    async def test_edit_message_rejects_blocked_thread_even_when_parent_is_allowed(self):
+        bot_user = SimpleNamespace(id=123_456_789_012_345_681)
+        thread = FakeThread()
+        message = FakeEditableMessage(bot_user.id)
+        thread.message = message
+        get_bot_member = AsyncMock(return_value=object())
+
+        with (
+            patch.object(self.server, "get_active_admin_tools_enabled", return_value=True),
+            patch.object(self.server.discord, "Thread", FakeThread),
+            patch.object(
+                self.server,
+                "ensure_client_ready",
+                AsyncMock(return_value=SimpleNamespace(user=bot_user)),
+            ),
+            patch.object(self.server, "get_message_target", AsyncMock(return_value=thread)),
+            patch.object(self.server, "get_active_blocked_channel_ids", return_value={THREAD_ID}),
+            patch.object(self.server, "get_bot_member", get_bot_member),
+            patch.object(self.server, "log_action"),
+        ):
+            result = await self.server.edit_message(
+                channel_id=str(THREAD_ID),
+                message_id=str(THREAD_ID),
+                new_message="must not be edited",
+                confirm=self.server.CONFIRM_APPLY_VALUE,
+            )
+
+        self.assertFalse(result["ok"], result)
+        self.assertEqual(result["error"]["message"], "Channel is blocked from writes.")
+        self.assertIsNone(message.edited_content)
+        get_bot_member.assert_not_awaited()
 
     async def test_read_messages_returns_bounded_page_with_continuation(self):
         channel = FakeHistoryChannel([fake_message(index) for index in range(100)])

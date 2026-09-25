@@ -3080,8 +3080,13 @@ def require_write_allowed(
     warnings: list[str] | None = None,
     guild_id: int | None = None,
     diagnostics: dict | None = None,
+    target_channel_id: int | None = None,
 ) -> dict | None:
-    if channel_id in get_active_blocked_channel_ids():
+    blocked_channel_ids = get_active_blocked_channel_ids()
+    blocked_channel_id = (
+        target_channel_id if target_channel_id in blocked_channel_ids else channel_id
+    )
+    if blocked_channel_id in blocked_channel_ids:
         error = build_error(
             "permission_denied",
             "Channel is blocked from writes.",
@@ -3095,7 +3100,7 @@ def require_write_allowed(
             error,
             warnings=warnings,
             guild_id=guild_id,
-            channel_id=channel_id,
+            channel_id=blocked_channel_id,
         )
     if is_write_allowed(channel_id):
         return None
@@ -3574,8 +3579,9 @@ async def get_text_channel(
     return channel
 
 
-async def get_message_target(channel_id: int | str):
-    client = await get_client()
+async def get_message_target(channel_id: int | str, client: commands.Bot | None = None):
+    if client is None:
+        client = await get_client()
     resolved_id = parse_snowflake(channel_id)
     if resolved_id is None:
         raise ClientInputError("channelId cannot be null")
@@ -4853,6 +4859,7 @@ async def send_message(
             request_id,
             warnings=warnings,
             diagnostics=diagnostics,
+            target_channel_id=resolved_channel_id,
         )
         if allow_error:
             return allow_error
@@ -5520,26 +5527,33 @@ async def edit_message(
             return error_with_log("edit_message", start_time, request_id, error)
 
         resolved_channel_id = resolve_channel_id(channel_id)
+        client = await ensure_client_ready()
+        channel = await get_message_target(resolved_channel_id, client)
+        policy_channel_id = (
+            channel.parent_id
+            if isinstance(channel, discord.Thread) and channel.parent_id
+            else channel.id
+        )
         diagnostics = {
             "resolved_channel_id": str(resolved_channel_id),
-            "allowed_channel": is_write_allowed(resolved_channel_id),
+            "policy_channel_id": str(policy_channel_id),
+            "allowed_channel": is_write_allowed(policy_channel_id),
             "content_length": len(new_message),
             "content_limit": 2000,
         }
 
         allow_error = require_write_allowed(
-            resolved_channel_id,
+            policy_channel_id,
             "edit_message",
             start_time,
             request_id,
             warnings=warnings,
             diagnostics=diagnostics,
+            target_channel_id=resolved_channel_id,
         )
         if allow_error:
             return allow_error
 
-        client = await ensure_client_ready()
-        channel = await get_text_channel(resolved_channel_id, client)
         member = await get_bot_member(channel.guild)
         perms = (
             channel.permissions_for(member) if member is not None else discord.Permissions.none()
@@ -6847,6 +6861,7 @@ async def archive_thread(thread_id: str, confirm: str = "") -> dict:
             start_time,
             request_id,
             warnings=warnings,
+            target_channel_id=thread.id,
         )
         if allow_error:
             return allow_error
@@ -6917,6 +6932,7 @@ async def unarchive_thread(thread_id: str, confirm: str = "") -> dict:
             start_time,
             request_id,
             warnings=warnings,
+            target_channel_id=thread.id,
         )
         if allow_error:
             return allow_error
