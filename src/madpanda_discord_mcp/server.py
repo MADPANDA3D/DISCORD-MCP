@@ -3906,6 +3906,37 @@ async def _effective_channel_permissions(
     }
 
 
+def _effective_permission_target(
+    identifiers: dict[str, str],
+    query: dict[str, Any],
+) -> tuple[str, str]:
+    selectors = [
+        ("user_id", identifiers.get("user_id", ""), "member"),
+        ("role_id", identifiers.get("role_id", ""), "role"),
+        ("target_id", identifiers.get("target_id", ""), None),
+    ]
+    selected = [(name, value, kind) for name, value, kind in selectors if str(value).strip()]
+    if len(selected) > 1:
+        raise ValueError(
+            "Effective permission lookup accepts only one of user_id, role_id, or target_id."
+        )
+
+    requested_type = str(query.get("target_type", "") or "").strip().lower()
+    if not selected:
+        if requested_type not in {"", "bot"}:
+            raise ValueError(f"{requested_type} permission lookup requires a target identifier.")
+        return "", "bot"
+
+    name, target_id, implied_type = selected[0]
+    if implied_type is not None:
+        if requested_type and requested_type != implied_type:
+            raise ValueError(f"{name} selects target_type={implied_type}, not {requested_type}.")
+        return str(target_id), implied_type
+
+    target_type = requested_type or "bot"
+    return str(target_id), target_type
+
+
 async def _run_server_management_action(
     expected_risk: str,
     action: str,
@@ -4265,11 +4296,15 @@ async def _run_server_management_action(
         if operation.action == "get_effective_channel_permissions":
             if guild is None or parsed_channel_id is None:
                 raise ValueError("channel_id is required for effective permission lookup.")
+            permission_target_id, permission_target_type = _effective_permission_target(
+                identifiers,
+                query,
+            )
             effective_result = await _effective_channel_permissions(
                 guild,
                 parsed_channel_id,
-                identifiers.get("target_id", ""),
-                str(query.get("target_type", "bot")),
+                permission_target_id,
+                permission_target_type,
             )
             result = {
                 "ok": True,
