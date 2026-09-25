@@ -37,15 +37,23 @@ LABEL org.opencontainers.image.title="MADPANDA3D Discord MCP" \
       org.opencontainers.image.licenses="MIT" \
       com.madpanda.source-fingerprint="${SOURCE_FINGERPRINT}"
 
-RUN apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 install --yes --no-install-recommends \
-      ca-certificates \
-      libpcre2-8-0=10.42-1+deb12u1 \
-    && rm -rf /var/lib/apt/lists/* \
-    && groupadd --gid 10001 app \
-    && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app \
-    && test "$(id -u app)" = "10001" \
-    && test "$(id -g app)" = "10001"
+RUN set -eux; \
+    for attempt in 1 2 3; do \
+      rm -rf /var/lib/apt/lists/*; \
+      if apt-get -o Acquire::Retries=3 update \
+        && apt-get -o Acquire::Retries=3 install --yes --no-install-recommends \
+          ca-certificates \
+          libpcre2-8-0=10.42-1+deb12u1; then \
+        break; \
+      fi; \
+      test "$attempt" -lt 3; \
+      sleep "$attempt"; \
+    done; \
+    rm -rf /var/lib/apt/lists/*; \
+    groupadd --gid 10001 app; \
+    useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app; \
+    test "$(id -u app)" = "10001"; \
+    test "$(id -g app)" = "10001"
 
 WORKDIR /app
 
