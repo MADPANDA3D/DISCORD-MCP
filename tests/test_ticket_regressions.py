@@ -73,6 +73,30 @@ class FakeEditableMessage:
         )
 
 
+class FakeDeletableMessage:
+    def __init__(self, author_id):
+        self.id = THREAD_ID
+        self.author = SimpleNamespace(id=author_id)
+        self.deleted = False
+
+    async def delete(self):
+        self.deleted = True
+
+
+class FakeVoiceChannel:
+    id = PARENT_CHANNEL_ID
+    guild = SimpleNamespace(id=GUILD_ID)
+
+    def __init__(self, message):
+        self.message = message
+
+    def permissions_for(self, _member):
+        return FakePermissions()
+
+    async def fetch_message(self, _message_id):
+        return self.message
+
+
 class FakeHistoryChannel:
     id = PARENT_CHANNEL_ID
     guild = SimpleNamespace(id=GUILD_ID)
@@ -224,6 +248,41 @@ class TicketRegressionTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["error"]["message"], "Channel is blocked from writes.")
         self.assertIsNone(message.edited_content)
         get_bot_member.assert_not_awaited()
+
+    async def test_delete_message_accepts_voice_channel_message_history(self):
+        bot_user = SimpleNamespace(id=123_456_789_012_345_681)
+        message = FakeDeletableMessage(bot_user.id)
+        channel = FakeVoiceChannel(message)
+        policy_ids = []
+
+        def require_write_allowed(channel_id, *_args, **_kwargs):
+            policy_ids.append(channel_id)
+            return None
+
+        with (
+            patch.object(self.server, "get_active_admin_tools_enabled", return_value=True),
+            patch.object(
+                self.server,
+                "ensure_client_ready",
+                AsyncMock(return_value=SimpleNamespace(user=bot_user)),
+            ),
+            patch.object(self.server, "get_message_target", AsyncMock(return_value=channel)),
+            patch.object(self.server, "get_bot_member", AsyncMock(return_value=object())),
+            patch.object(self.server, "require_write_allowed", require_write_allowed),
+            patch.object(self.server, "is_write_allowed", return_value=True),
+            patch.object(self.server, "record_api_success"),
+            patch.object(self.server, "log_action"),
+        ):
+            result = await self.server.delete_message(
+                channel_id=str(PARENT_CHANNEL_ID),
+                message_id=str(THREAD_ID),
+                confirm=self.server.CONFIRM_APPLY_VALUE,
+            )
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(policy_ids, [PARENT_CHANNEL_ID])
+        self.assertEqual(result["data"]["channel_id"], str(PARENT_CHANNEL_ID))
+        self.assertTrue(message.deleted)
 
     async def test_read_messages_returns_bounded_page_with_continuation(self):
         channel = FakeHistoryChannel([fake_message(index) for index in range(100)])
