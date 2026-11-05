@@ -221,6 +221,12 @@ class ToolManifestTests(unittest.IsolatedAsyncioTestCase):
             module.get_image_reference(f"ghcr.io/madpanda3d/discord-mcp-server@sha256:{digest}"),
             f"ghcr.io/madpanda3d/discord-mcp-server@sha256:{digest}",
         )
+        self.assertEqual(
+            module.get_image_reference(f"discord-mcp@sha256:{digest}"),
+            f"discord-mcp@sha256:{digest}",
+        )
+        self.assertEqual(module.get_image_reference(f"discord-mcp@sha256:{digest[:-1]}"), "unknown")
+        self.assertEqual(module.get_image_reference(f"other-mcp@sha256:{digest}"), "unknown")
         self.assertEqual(module.get_image_reference("discord-mcp:latest"), "unknown")
         self.assertEqual(module.get_image_reference("secret-image-value"), "unknown")
 

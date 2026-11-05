@@ -35,7 +35,7 @@ RISK_LEVELS = {"read", "write", "destructive"}
 _SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{7,64}$")
 _SOURCE_FINGERPRINT_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _IMAGE_REFERENCE_PATTERN = re.compile(
-    r"^ghcr\.io/madpanda3d/discord-mcp-server@sha256:[0-9a-f]{64}$"
+    r"^(?:ghcr\.io/madpanda3d/discord-mcp-server|discord-mcp)@sha256:[0-9a-f]{64}$"
 )
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 

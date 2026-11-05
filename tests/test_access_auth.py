@@ -456,6 +456,11 @@ class AccessControlTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(health["public_mode"])
         self.assertFalse(health["portal_grant_configured"])
 
+        local_image = f"discord-mcp@sha256:{'a' * 64}"
+        with patch.dict(os.environ, {"MCP_IMAGE_REFERENCE": local_image}):
+            _, local_body, _ = await invoke(app, path="/health")
+        self.assertEqual(json.loads(local_body)["image_reference"], local_image)
+
         with patch.dict(
             os.environ,
             {
