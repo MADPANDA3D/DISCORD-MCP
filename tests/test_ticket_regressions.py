@@ -137,6 +137,18 @@ def fake_message(index):
     )
 
 
+class DockerfileRegressionTests(unittest.TestCase):
+    def test_runtime_image_upgrades_fixed_base_packages_before_install(self):
+        dockerfile = Path(__file__).resolve().parents[1].joinpath("Dockerfile").read_text()
+        update = "apt-get -o Acquire::Retries=3 update"
+        upgrade = "apt-get -o Acquire::Retries=3 upgrade --yes --no-install-recommends"
+        install = "apt-get -o Acquire::Retries=3 install --yes --no-install-recommends"
+
+        self.assertLess(dockerfile.index(update), dockerfile.index(upgrade))
+        self.assertLess(dockerfile.index(upgrade), dockerfile.index(install))
+        self.assertIn("rm -rf /var/lib/apt/lists/*", dockerfile)
+
+
 class TicketRegressionTests(unittest.IsolatedAsyncioTestCase):
     @classmethod
     def setUpClass(cls):
