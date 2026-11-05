@@ -5736,24 +5736,31 @@ async def delete_message(
             return error_with_log("delete_message", start_time, request_id, error)
 
         resolved_channel_id = resolve_channel_id(channel_id)
+        client = await ensure_client_ready()
+        channel = await get_message_target(resolved_channel_id, client)
+        policy_channel_id = (
+            channel.parent_id
+            if isinstance(channel, discord.Thread) and channel.parent_id
+            else channel.id
+        )
         diagnostics = {
             "resolved_channel_id": str(resolved_channel_id),
-            "allowed_channel": is_write_allowed(resolved_channel_id),
+            "policy_channel_id": str(policy_channel_id),
+            "allowed_channel": is_write_allowed(policy_channel_id),
         }
 
         allow_error = require_write_allowed(
-            resolved_channel_id,
+            policy_channel_id,
             "delete_message",
             start_time,
             request_id,
             warnings=warnings,
             diagnostics=diagnostics,
+            target_channel_id=resolved_channel_id,
         )
         if allow_error:
             return allow_error
 
-        channel = await get_text_channel(resolved_channel_id)
-        client = await get_client()
         member = await get_bot_member(channel.guild)
         perms = (
             channel.permissions_for(member) if member is not None else discord.Permissions.none()

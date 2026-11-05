@@ -41,9 +41,10 @@ RUN set -eux; \
     for attempt in 1 2 3; do \
       rm -rf /var/lib/apt/lists/*; \
       if apt-get -o Acquire::Retries=3 update \
+        && apt-get -o Acquire::Retries=3 upgrade --yes --no-install-recommends \
         && apt-get -o Acquire::Retries=3 install --yes --no-install-recommends \
           ca-certificates \
-          libpcre2-8-0=10.42-1+deb12u1; then \
+          libpcre2-8-0; then \
         break; \
       fi; \
       test "$attempt" -lt 3; \
