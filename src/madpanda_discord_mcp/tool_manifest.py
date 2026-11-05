@@ -1775,7 +1775,7 @@ def enrich_input_schema(tool_name: str, input_schema: Mapping[str, Any]) -> dict
         channel_schema = properties.get("channel_id")
         if isinstance(channel_schema, dict):
             channel_schema["minLength"] = 1
-            channel_schema["pattern"] = r".*\S.*"
+            channel_schema["pattern"] = r"^\s*\S"
             channel_schema["description"] = (
                 "Required Discord channel snowflake to search; blank values are rejected because "
                 "hosted Portal requests do not have an implicit default channel."
