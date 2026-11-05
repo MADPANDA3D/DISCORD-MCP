@@ -296,6 +296,9 @@ docker compose pull
 docker compose up --detach --no-build --wait
 ```
 
+Coolify local builds use `discord-mcp@sha256:<Docker image ID>` for
+`MCP_IMAGE_REFERENCE`; the digest must match the inspected running image.
+
 Stable tags must point to a commit already reachable from protected `main`. The release workflow
 rechecks that ancestry and exact tag identity, tests Python 3.12/3.13, audits locked dependencies,
 checks wheel/sdist allowlists, scans source and image content, emits provenance/SBOM data, requires

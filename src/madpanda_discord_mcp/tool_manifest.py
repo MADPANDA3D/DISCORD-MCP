@@ -35,7 +35,7 @@ RISK_LEVELS = {"read", "write", "destructive"}
 _SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{7,64}$")
 _SOURCE_FINGERPRINT_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _IMAGE_REFERENCE_PATTERN = re.compile(
-    r"^ghcr\.io/madpanda3d/discord-mcp-server@sha256:[0-9a-f]{64}$"
+    r"^(?:ghcr\.io/madpanda3d/discord-mcp-server|discord-mcp)@sha256:[0-9a-f]{64}$"
 )
 _TOKEN_PATTERN = re.compile(r"[a-z0-9]+")
 
@@ -1775,7 +1775,7 @@ def enrich_input_schema(tool_name: str, input_schema: Mapping[str, Any]) -> dict
         channel_schema = properties.get("channel_id")
         if isinstance(channel_schema, dict):
             channel_schema["minLength"] = 1
-            channel_schema["pattern"] = r".*\S.*"
+            channel_schema["pattern"] = r"^\s*\S"
             channel_schema["description"] = (
                 "Required Discord channel snowflake to search; blank values are rejected because "
                 "hosted Portal requests do not have an implicit default channel."

@@ -1,5 +1,6 @@
 import importlib
 import os
+import re
 import sys
 import unittest
 from pathlib import Path
@@ -27,7 +28,12 @@ class SearchMessagesContractTests(unittest.TestCase):
 
         self.assertIn("channel_id", schema["required"])
         self.assertEqual(schema["properties"]["channel_id"]["minLength"], 1)
-        self.assertEqual(schema["properties"]["channel_id"]["pattern"], r".*\S.*")
+        pattern = schema["properties"]["channel_id"]["pattern"]
+        self.assertEqual(pattern, r"^\s*\S")
+        for value in ("", " ", "\t\n"):
+            self.assertIsNone(re.search(pattern, value))
+        for value in ("123", "  123", "\n123"):
+            self.assertIsNotNone(re.search(pattern, value))
 
         descriptor = next(
             tool
